@@ -14,6 +14,7 @@ def main() -> int:
     args = sys.argv[1:]
     if "--help" in args or "-h" in args:
         print("用法: python3 -m dayline [--desktop | --quit]\n\n不带参数时打开日程编辑器；--desktop 仅显示桌面日程卡片；--quit 退出正在运行的时序。")
+        print("用法: python3 -m dayline [--desktop | --quit]\n\n不带参数时打开日程编辑器；--desktop 仅显示桌面日程卡片；--quit 退出正在运行的 DayLine。")
         return 0
     unknown = [arg for arg in args if arg not in {"--desktop", "--quit"}]
     if unknown:
@@ -25,10 +26,12 @@ def main() -> int:
     GLib.set_application_name(APP_NAME)
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         print("时序需要在 Ubuntu 图形桌面会话中运行（未检测到 DISPLAY 或 WAYLAND_DISPLAY）。", file=sys.stderr)
+        print("DayLine 需要在 Ubuntu 图形桌面会话中运行（未检测到 DISPLAY 或 WAYLAND_DISPLAY）。", file=sys.stderr)
         return 1
     display_name = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
     if Gdk.Display.open(display_name) is None:
         print("无法连接到图形桌面会话，请从已登录的 Ubuntu 桌面中启动时序。", file=sys.stderr)
+        print("无法连接到图形桌面会话，请从已登录的 Ubuntu 桌面中启动 DayLine。", file=sys.stderr)
         return 1
     # Localize GTK's stock calendar labels without changing the user's system-wide locale.
     try:

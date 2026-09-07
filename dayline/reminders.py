@@ -33,6 +33,7 @@ class ReminderService:
 
     def _notify(self, event: Event) -> None:
         notification = Gio.Notification.new("时序提醒")
+        notification = Gio.Notification.new("DayLine 提醒")
         notification.set_body(f"{event.title} · {event.starts_at:%H:%M}")
         notification.set_priority(Gio.NotificationPriority.URGENT)
         self.app.send_notification(f"event-{event.id}", notification)
@@ -46,6 +47,7 @@ class ReminderService:
 class ReminderWindow(Gtk.Window):
     def __init__(self, app, event: Event, store: EventStore, on_changed):
         super().__init__(application=app, title="时序提醒", modal=False)
+        super().__init__(application=app, title="DayLine 提醒", modal=False)
         self.event, self.store, self.on_changed = event, store, on_changed
         self.set_default_size(390, 205)
         self.set_resizable(False)

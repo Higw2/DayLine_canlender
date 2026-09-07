@@ -193,6 +193,7 @@ class X11DesktopHints:
 class DesktopWidget(Gtk.Window):
     def __init__(self, app, store: EventStore, open_editor, create_event, quit_app, open_settings=None):
         super().__init__(application=app, title="时序 · 桌面日程")
+        super().__init__(application=app, title="DayLine · 桌面日程")
         self.store, self.open_editor, self.create_event, self.quit_app = store, open_editor, create_event, quit_app
         self.open_settings = open_settings
         self.hints_applied = False
@@ -204,12 +205,14 @@ class DesktopWidget(Gtk.Window):
         self._drag_pointer_origin: tuple[int, int] | None = None
         self._position_file = self._default_position_file()
         self._drag_header: Gtk.Widget | None = None
+        self._clock_timer: int = 0
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_default_size(390, 286)
         self.add_css_class("desktop-widget")
         self.connect("realize", self._on_realize)
         self.connect("map", self._on_map)
+        self.connect("unmap", self._on_unmap)
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(self._root)
         self.refresh()
@@ -253,6 +256,17 @@ class DesktopWidget(Gtk.Window):
         if self._x11_hints and self._x11_xid and not self._x11_map_reapply_scheduled:
             self._x11_map_reapply_scheduled = True
             GLib.timeout_add(120, self._reapply_x11_hints)
+        if not self._clock_timer:
+            self._clock_timer = GLib.timeout_add_seconds(30, self._tick_clock)
+
+    def _on_unmap(self, *_):
+        if self._clock_timer:
+            GLib.source_remove(self._clock_timer)
+            self._clock_timer = 0
+
+    def _tick_clock(self):
+        self.refresh()
+        return True
 
     def _reapply_x11_hints(self):
         self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position)
@@ -281,6 +295,7 @@ class DesktopWidget(Gtk.Window):
 
         brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, valign=Gtk.Align.CENTER)
         brand_pill = Gtk.Label(label="时序")
+        brand_pill = Gtk.Label(label="DayLine")
         brand_pill.add_css_class("desktop-brand-pill")
         brand_box.append(brand_pill)
         header.append(brand_box)
@@ -288,6 +303,16 @@ class DesktopWidget(Gtk.Window):
         grip = Gtk.Label(label="━ ━ ━", hexpand=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         grip.add_css_class("desktop-drag-grip")
         header.append(grip)
+        # Center: Current time replacing the previous 3 horizontal lines
+        current_time = Gtk.Label(
+            label=now.strftime("%H:%M"),
+            hexpand=True,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        current_time.add_css_class("desktop-drag-time")
+        current_time.set_tooltip_text("当前时间 · 按住此处拖动卡片")
+        header.append(current_time)
 
         weekday = "一二三四五六日"[now.weekday()]
         date = Gtk.Label(label=f"{now:%m月%d日} 周{weekday}", xalign=1, valign=Gtk.Align.CENTER)
@@ -341,6 +366,7 @@ class DesktopWidget(Gtk.Window):
         settings_button.connect("clicked", lambda *_: self.open_settings() if self.open_settings else None)
 
         quit_button = Gtk.Button(icon_name="application-exit-symbolic", tooltip_text="退出时序")
+        quit_button = Gtk.Button(icon_name="application-exit-symbolic", tooltip_text="退出 DayLine")
         quit_button.add_css_class("desktop-action-btn")
         quit_button.connect("clicked", lambda *_: self.quit_app())
 

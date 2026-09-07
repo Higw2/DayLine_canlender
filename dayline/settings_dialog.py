@@ -17,6 +17,7 @@ class SettingsDialog(Adw.PreferencesWindow):
 
     def __init__(self, parent: Gtk.Window | None = None):
         super().__init__(title="时序 · 偏好设置")
+        super().__init__(title="DayLine · 偏好设置")
         if parent:
             self.set_transient_for(parent)
             self.set_modal(True)

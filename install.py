@@ -34,10 +34,12 @@ def install(prefix, config, autostart=False):
     desktop.parent.mkdir(parents=True, exist_ok=True)
     entry = ('[Desktop Entry]\nType=Application\nVersion=1.0\n'
              'Name=时序 · Dayline\nName[zh_CN]=时序日程\n'
+             'Name=DayLine\nName[zh_CN]=DayLine 日程\n'
              'Comment=Your day, beautifully in view\nComment[zh_CN]=桌面时间线与日程提醒\n'
              f'Exec={desktop_quote(launcher)}\nIcon={APP_ID}\n'
              'Terminal=false\nCategories=Office;Calendar;\n'
              'Keywords=Calendar;Schedule;Timeline;Dayline;时序日程;日程;日历;\nStartupNotify=true\n'
+             'Keywords=Calendar;Schedule;Timeline;DayLine;日程;日历;\nStartupNotify=true\n'
              f'StartupWMClass={APP_ID}\n')
     desktop.write_text(entry)
     if autostart:
@@ -49,6 +51,7 @@ def install(prefix, config, autostart=False):
     if shutil.which('update-desktop-database'):
         subprocess.run(['update-desktop-database', str(desktop.parent)], check=False)
     print(f'已安装：{launcher}\n可从应用列表打开「时序日程」。')
+    print(f'已安装：{launcher}\n可从应用列表打开「DayLine」。')
     if autostart:
         print('已启用登录后显示桌面日程。')
 
@@ -66,6 +69,7 @@ def uninstall(prefix, config):
 
 def main():
     parser = argparse.ArgumentParser(description='时序日程：无需 sudo 的用户级安装器')
+    parser = argparse.ArgumentParser(description='DayLine：无需 sudo 的用户级安装器')
     parser.add_argument('--prefix', type=Path, default=Path.home() / '.local')
     parser.add_argument('--config-dir', type=Path,
                         default=Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')))

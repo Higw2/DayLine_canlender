@@ -84,6 +84,7 @@ class EventDialog(Gtk.Dialog):
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app, store: EventStore, desktop: DesktopWidget):
         super().__init__(application=app, title="时序 · Dayline")
+        super().__init__(application=app, title="DayLine")
         self.store, self.desktop, self.selected_day = store, desktop, date.today()
         self.set_default_size(1060, 720)
         self.set_size_request(780, 560)
@@ -121,6 +122,7 @@ class MainWindow(Adw.ApplicationWindow):
         brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
         brand_icon = Gtk.Image(icon_name="x-office-calendar-symbolic")
         brand = Gtk.Label(label="时序 · Dayline", xalign=0)
+        brand = Gtk.Label(label="DayLine", xalign=0)
         brand.add_css_class("brand")
         brand_box.append(brand_icon)
         brand_box.append(brand)
@@ -150,6 +152,7 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar.append(desktop_note)
 
         quit_button = Gtk.Button(label="退出时序")
+        quit_button = Gtk.Button(label="退出 DayLine")
         quit_button.add_css_class("flat")
         quit_button.connect("clicked", lambda *_: self.get_application().quit())
         sidebar.append(quit_button)

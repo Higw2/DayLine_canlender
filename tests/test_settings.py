@@ -101,6 +101,7 @@ class ThemeTests(unittest.TestCase):
         self.assertIn("#2563eb", css)
         self.assertIn("desktop-drag-area", css)
         self.assertIn("desktop-drag-grip", css)
+        self.assertIn("desktop-drag-time", css)
         self.assertIn("upcoming-mini-card", css)
 
     def test_css_generation_light_desktop_theme(self):
@@ -108,6 +109,9 @@ class ThemeTests(unittest.TestCase):
         css = generate_css(settings)
         self.assertIn("#ffffff", css)
         self.assertIn("desktop-widget", css)
+        self.assertIn("desktop-drag-time", css)
+        # Verify light theme uses dark text for event title
+        self.assertIn(".desktop-event {\n    color: #111827;", css)
 
 
 if __name__ == "__main__":

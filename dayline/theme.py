@@ -85,31 +85,90 @@ def generate_css(settings: AppSettings) -> str:
         return max(9, int(round(base * scale)))
 
     # Desktop widget background by style
+    # Desktop widget styling by theme
     if settings.desktop_theme == "tinted":
         r, g, b = parse_hex_color(theme)
         desktop_bg = f"rgba({max(12, int(r * 0.18))}, {max(16, int(g * 0.18))}, {max(18, int(b * 0.18))}, 0.94)"
         desktop_fg = "#f8f8f2"
         desktop_time_fg = lighter_theme
+        desktop_shadow = "0 16px 36px rgba(0, 0, 0, 0.36)"
         desktop_drag_bg = "rgba(255, 255, 255, 0.10)"
         desktop_drag_hover = "rgba(255, 255, 255, 0.18)"
         desktop_drag_active = "rgba(255, 255, 255, 0.26)"
+        desktop_drag_time_fg = lighter_theme
+        desktop_drag_time_hover_fg = "#ffffff"
         desktop_border = "rgba(255, 255, 255, 0.14)"
+        desktop_brand_fg = "#ffffff"
+        desktop_date_fg = "rgba(255, 255, 255, 0.75)"
+        desktop_subtitle_fg = "rgba(255, 255, 255, 0.65)"
+        desktop_event_row_bg = "rgba(255, 255, 255, 0.06)"
+        desktop_event_row_border = "rgba(255, 255, 255, 0.05)"
+        desktop_event_row_hover_bg = "rgba(255, 255, 255, 0.12)"
+        desktop_event_row_hover_border = "rgba(255, 255, 255, 0.15)"
+        desktop_event_fg = "#ffffff"
+        desktop_event_detail_fg = "rgba(255, 255, 255, 0.60)"
+        desktop_action_btn_bg = "rgba(255, 255, 255, 0.10)"
+        desktop_action_btn_border = "rgba(255, 255, 255, 0.10)"
+        desktop_action_btn_fg = "#ffffff"
+        desktop_action_btn_hover_bg = "rgba(255, 255, 255, 0.18)"
+        desktop_action_btn_hover_border = "rgba(255, 255, 255, 0.25)"
+        desktop_time_pill_bg = hex_to_rgba_css(theme, 0.28)
+        desktop_time_pill_fg = lighter_theme
     elif settings.desktop_theme == "light":
         desktop_bg = "#ffffff"
         desktop_fg = "#1f2937"
         desktop_time_fg = theme
+        desktop_fg = "#111827"
+        desktop_shadow = "0 12px 30px rgba(0, 0, 0, 0.12)"
         desktop_drag_bg = "rgba(0, 0, 0, 0.04)"
         desktop_drag_hover = "rgba(0, 0, 0, 0.08)"
         desktop_drag_active = "rgba(0, 0, 0, 0.14)"
+        desktop_drag_time_fg = theme
+        desktop_drag_time_hover_fg = hover_theme
         desktop_border = "rgba(0, 0, 0, 0.10)"
+        desktop_brand_fg = "#111827"
+        desktop_date_fg = "#4b5563"
+        desktop_subtitle_fg = "#4b5563"
+        desktop_event_row_bg = "rgba(0, 0, 0, 0.03)"
+        desktop_event_row_border = "rgba(0, 0, 0, 0.06)"
+        desktop_event_row_hover_bg = "rgba(0, 0, 0, 0.07)"
+        desktop_event_row_hover_border = "rgba(0, 0, 0, 0.12)"
+        desktop_event_fg = "#111827"
+        desktop_event_detail_fg = "#6b7280"
+        desktop_action_btn_bg = "rgba(0, 0, 0, 0.05)"
+        desktop_action_btn_border = "rgba(0, 0, 0, 0.09)"
+        desktop_action_btn_fg = "#374151"
+        desktop_action_btn_hover_bg = "rgba(0, 0, 0, 0.10)"
+        desktop_action_btn_hover_border = "rgba(0, 0, 0, 0.18)"
+        desktop_time_pill_bg = hex_to_rgba_css(theme, 0.12)
+        desktop_time_pill_fg = theme
     else:  # dark (default)
         desktop_bg = "#182220"
         desktop_fg = "#f8f8f2"
         desktop_time_fg = lighter_theme
+        desktop_shadow = "0 16px 36px rgba(0, 0, 0, 0.36)"
         desktop_drag_bg = "rgba(255, 255, 255, 0.09)"
         desktop_drag_hover = "rgba(255, 255, 255, 0.16)"
         desktop_drag_active = "rgba(255, 255, 255, 0.24)"
+        desktop_drag_time_fg = lighter_theme
+        desktop_drag_time_hover_fg = "#ffffff"
         desktop_border = "rgba(255, 255, 255, 0.12)"
+        desktop_brand_fg = "#ffffff"
+        desktop_date_fg = "rgba(255, 255, 255, 0.75)"
+        desktop_subtitle_fg = "rgba(255, 255, 255, 0.65)"
+        desktop_event_row_bg = "rgba(255, 255, 255, 0.06)"
+        desktop_event_row_border = "rgba(255, 255, 255, 0.05)"
+        desktop_event_row_hover_bg = "rgba(255, 255, 255, 0.12)"
+        desktop_event_row_hover_border = "rgba(255, 255, 255, 0.15)"
+        desktop_event_fg = "#ffffff"
+        desktop_event_detail_fg = "rgba(255, 255, 255, 0.60)"
+        desktop_action_btn_bg = "rgba(255, 255, 255, 0.10)"
+        desktop_action_btn_border = "rgba(255, 255, 255, 0.10)"
+        desktop_action_btn_fg = "#ffffff"
+        desktop_action_btn_hover_bg = "rgba(255, 255, 255, 0.18)"
+        desktop_action_btn_hover_border = "rgba(255, 255, 255, 0.25)"
+        desktop_time_pill_bg = hex_to_rgba_css(theme, 0.28)
+        desktop_time_pill_fg = lighter_theme
 
     css = f"""
 /* Root & Window */
@@ -347,6 +406,7 @@ calendar header button {{
     border-radius: 22px;
     border: 1px solid {desktop_border};
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
+    box-shadow: {desktop_shadow};
 }}
 
 /* Desktop Drag Area (Distinct visual indicator for dragging) */
@@ -369,9 +429,19 @@ calendar header button {{
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }}
 .desktop-drag-grip {{
-    color: rgba(255, 255, 255, 0.45);
+    color: {desktop_drag_time_fg};
     font-size: {fs(14)}px;
     margin: 0 6px;
+}}
+.desktop-drag-time {{
+    color: {desktop_drag_time_fg};
+    font-size: {fs(13)}px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    letter-spacing: 0.5px;
+}}
+.desktop-drag-area:hover .desktop-drag-time {{
+    color: {desktop_drag_time_hover_fg};
 }}
 .desktop-drag-area:hover .desktop-drag-grip {{
     color: {lighter_theme};
@@ -379,7 +449,7 @@ calendar header button {{
 .desktop-brand {{
     font-size: {fs(16)}px;
     font-weight: 800;
-    color: #ffffff;
+    color: {desktop_brand_fg};
     letter-spacing: -0.2px;
 }}
 .desktop-brand-pill {{
@@ -391,30 +461,30 @@ calendar header button {{
     font-weight: 800;
 }}
 .desktop-date {{
-    color: rgba(255, 255, 255, 0.75);
+    color: {desktop_date_fg};
     font-size: {fs(11)}px;
     font-weight: 500;
 }}
 .desktop-subtitle {{
-    color: rgba(255, 255, 255, 0.65);
+    color: {desktop_subtitle_fg};
     font-size: {fs(12)}px;
     font-weight: 600;
 }}
 .desktop-event-row {{
-    background: rgba(255, 255, 255, 0.06);
+    background: {desktop_event_row_bg};
     border-radius: 10px;
     padding: 8px 12px;
     margin: 4px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid {desktop_event_row_border};
     transition: background 150ms ease;
 }}
 .desktop-event-row:hover {{
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.15);
+    background: {desktop_event_row_hover_bg};
+    border-color: {desktop_event_row_hover_border};
 }}
 .desktop-time-pill {{
-    background: {hex_to_rgba_css(theme, 0.28)};
-    color: {desktop_time_fg};
+    background: {desktop_time_pill_bg};
+    color: {desktop_time_pill_fg};
     font-weight: 800;
     font-size: {fs(12)}px;
     border-radius: 6px;
@@ -422,12 +492,12 @@ calendar header button {{
     min-width: 44px;
 }}
 .desktop-event {{
-    color: #ffffff;
+    color: {desktop_event_fg};
     font-weight: 700;
     font-size: {fs(13)}px;
 }}
 .desktop-event-detail {{
-    color: rgba(255, 255, 255, 0.60);
+    color: {desktop_event_detail_fg};
     font-size: {fs(11)}px;
 }}
 .desktop-new {{
@@ -442,15 +512,15 @@ calendar header button {{
     background: {hover_theme};
 }}
 .desktop-action-btn {{
-    background: rgba(255, 255, 255, 0.10);
-    color: #ffffff;
+    background: {desktop_action_btn_bg};
+    color: {desktop_action_btn_fg};
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    border: 1px solid {desktop_action_btn_border};
     padding: 5px 10px;
 }}
 .desktop-action-btn:hover {{
-    background: rgba(255, 255, 255, 0.18);
-    border-color: rgba(255, 255, 255, 0.25);
+    background: {desktop_action_btn_hover_bg};
+    border-color: {desktop_action_btn_hover_border};
 }}
 
 /* Reminder Window */
