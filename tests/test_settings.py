@@ -110,6 +110,8 @@ class ThemeTests(unittest.TestCase):
         self.assertIn("#ffffff", css)
         self.assertIn("desktop-widget", css)
         self.assertIn("desktop-drag-time", css)
+        self.assertIn("desktop-resize-handle", css)
+        self.assertIn("desktop-events-scroll", css)
         # Verify light theme uses dark text for event title
         self.assertIn(".desktop-event {\n    color: #111827;", css)
 

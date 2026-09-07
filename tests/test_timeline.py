@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GObject, Gtk
 
-from dayline.desktop import X11DesktopHints
+from dayline.desktop import DesktopWidget, X11DesktopHints
 from dayline.timeline import CLOCK_REFRESH_SECONDS, TimelineCanvas, assign_overlap_columns, clip_event_to_day
 
 
@@ -92,6 +92,23 @@ class TimelineLayoutTests(unittest.TestCase):
         ]
         placements = assign_overlap_columns(items)
         self.assertEqual([item.columns for item in placements], [2, 2])
+
+    def test_desktop_geometry_load_and_resizability(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            pos_file = Path(td) / "desktop-position"
+            # Test 2-value legacy format
+            pos_file.write_text("150,220\n", encoding="utf-8")
+            widget = DesktopWidget.__new__(DesktopWidget)
+            widget._position_file = pos_file
+            geom = widget._load_geometry()
+            self.assertEqual(geom, (150, 220, 390, 286))
+
+            # Test 4-value geometry format (with width and height)
+            pos_file.write_text("300,400,520,410\n", encoding="utf-8")
+            geom4 = widget._load_geometry()
+            self.assertEqual(geom4, (300, 400, 520, 410))
 
 
 if __name__ == "__main__":

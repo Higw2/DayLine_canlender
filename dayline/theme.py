@@ -522,6 +522,31 @@ calendar header button {{
     background: {desktop_action_btn_hover_bg};
     border-color: {desktop_action_btn_hover_border};
 }}
+.desktop-events-scroll {{
+    background: transparent;
+    border: none;
+}}
+.desktop-resize-handle {{
+    padding: 3px 4px;
+    border-radius: 6px;
+    transition: background 150ms ease;
+}}
+.desktop-resize-handle:hover,
+.desktop-resize-handle.resizing {{
+    background: {desktop_action_btn_hover_bg};
+}}
+.desktop-resize-icon {{
+    color: {desktop_date_fg};
+    font-size: {fs(13)}px;
+    font-weight: bold;
+    opacity: 0.60;
+    transition: color 150ms ease, opacity 150ms ease;
+}}
+.desktop-resize-handle:hover .desktop-resize-icon,
+.desktop-resize-handle.resizing .desktop-resize-icon {{
+    color: {theme};
+    opacity: 1.0;
+}}
 
 /* Reminder Window */
 .reminder-window {{

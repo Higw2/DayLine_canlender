@@ -60,6 +60,16 @@ class X11DesktopHints:
             self.lib.XSendEvent.restype = ctypes.c_int
             self.lib.XFlush.argtypes = [ctypes.c_void_p]
             self.lib.XMoveWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int]
+            self.lib.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
+            self.lib.XResizeWindow.restype = ctypes.c_int
+            self.lib.XGetGeometry.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong,
+                ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint),
+                ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint),
+            ]
+            self.lib.XGetGeometry.restype = ctypes.c_int
             self.lib.XQueryPointer.argtypes = [
                 ctypes.c_void_p, ctypes.c_ulong,
                 ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
@@ -130,7 +140,43 @@ class X11DesktopHints:
         finally:
             self.lib.XCloseDisplay(display)
 
-    def apply(self, xid: int, position: tuple[int, int] | None = None) -> bool:
+    def resize(self, xid: int, width: int, height: int) -> None:
+        if not self.lib or not xid:
+            return
+        display = self.lib.XOpenDisplay(None)
+        if not display:
+            return
+        try:
+            self.lib.XResizeWindow(display, xid, max(300, width), max(200, height))
+            self.lib.XFlush(display)
+        finally:
+            self.lib.XCloseDisplay(display)
+
+    def geometry(self, xid: int) -> tuple[int, int, int, int] | None:
+        if not self.lib or not xid:
+            return None
+        display = self.lib.XOpenDisplay(None)
+        if not display:
+            return None
+        try:
+            root = ctypes.c_ulong()
+            x = ctypes.c_int()
+            y = ctypes.c_int()
+            w = ctypes.c_uint()
+            h = ctypes.c_uint()
+            bw = ctypes.c_uint()
+            depth = ctypes.c_uint()
+            ok = self.lib.XGetGeometry(
+                display, xid, ctypes.byref(root),
+                ctypes.byref(x), ctypes.byref(y),
+                ctypes.byref(w), ctypes.byref(h),
+                ctypes.byref(bw), ctypes.byref(depth),
+            )
+            return (x.value, y.value, int(w.value), int(h.value)) if ok else None
+        finally:
+            self.lib.XCloseDisplay(display)
+
+    def apply(self, xid: int, position: tuple[int, int] | None = None, size: tuple[int, int] | None = None) -> bool:
         if not self.lib or not xid:
             return False
         display = self.lib.XOpenDisplay(None)
@@ -177,6 +223,8 @@ class X11DesktopHints:
                 (ctypes.c_long * 5)(self.ALL_DESKTOPS, 1, 0, 0, 0),
             )
             self.lib.XSendEvent(display, root, 0, state_mask, ctypes.cast(ctypes.byref(desktop_event), ctypes.c_void_p))
+            if size:
+                self.lib.XResizeWindow(display, xid, max(300, size[0]), max(200, size[1]))
             if position:
                 self.lib.XMoveWindow(display, xid, position[0], position[1])
             # Reassert the properties after the WM has processed the mapped
@@ -192,7 +240,6 @@ class X11DesktopHints:
 
 class DesktopWidget(Gtk.Window):
     def __init__(self, app, store: EventStore, open_editor, create_event, quit_app, open_settings=None):
-        super().__init__(application=app, title="时序 · 桌面日程")
         super().__init__(application=app, title="DayLine · 桌面日程")
         self.store, self.open_editor, self.create_event, self.quit_app = store, open_editor, create_event, quit_app
         self.open_settings = open_settings
@@ -200,14 +247,19 @@ class DesktopWidget(Gtk.Window):
         self._x11_hints: X11DesktopHints | None = None
         self._x11_xid = 0
         self._x11_position: tuple[int, int] | None = None
+        self._desktop_size: tuple[int, int] = (390, 286)
         self._x11_map_reapply_scheduled = False
         self._drag_origin: tuple[int, int] | None = None
         self._drag_pointer_origin: tuple[int, int] | None = None
         self._position_file = self._default_position_file()
         self._drag_header: Gtk.Widget | None = None
+        self._resize_grip: Gtk.Widget | None = None
+        self._resize_start_size: tuple[int, int] | None = None
+        self._resize_pointer_origin: tuple[int, int] | None = None
         self._clock_timer: int = 0
         self.set_decorated(False)
-        self.set_resizable(False)
+        self.set_resizable(True)
+        self.set_size_request(340, 220)
         self.set_default_size(390, 286)
         self.add_css_class("desktop-widget")
         self.connect("realize", self._on_realize)
@@ -222,10 +274,14 @@ class DesktopWidget(Gtk.Window):
         config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         return config_home / "dayline" / "desktop-position"
 
-    def _load_position(self) -> tuple[int, int] | None:
+    def _load_geometry(self) -> tuple[int, int, int, int] | None:
         try:
-            x, y = self._position_file.read_text(encoding="utf-8").strip().split(",", 1)
-            return int(x), int(y)
+            parts = self._position_file.read_text(encoding="utf-8").strip().split(",")
+            if len(parts) >= 4:
+                return int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+            elif len(parts) >= 2:
+                return int(parts[0]), int(parts[1]), 390, 286
+            return None
         except (OSError, ValueError):
             return None
 
@@ -235,8 +291,12 @@ class DesktopWidget(Gtk.Window):
         position = self._x11_hints.position(self._x11_xid)
         if position is not None:
             self._x11_position = position
+            geom = self._x11_hints.geometry(self._x11_xid)
+            w = geom[2] if geom else self.get_width()
+            h = geom[3] if geom else self.get_height()
+            self._desktop_size = (w, h)
             self._position_file.parent.mkdir(parents=True, exist_ok=True)
-            self._position_file.write_text(f"{position[0]},{position[1]}\n", encoding="utf-8")
+            self._position_file.write_text(f"{position[0]},{position[1]},{w},{h}\n", encoding="utf-8")
         return False
 
     def _on_realize(self, *_):
@@ -246,11 +306,17 @@ class DesktopWidget(Gtk.Window):
             return
         monitor = display.get_monitors().get_item(0)
         geometry = monitor.get_geometry()
-        # Keep it clear of the upper-left desktop icon area by default.
-        self._x11_position = self._load_position() or (geometry.x + geometry.width - 420, geometry.y + 84)
+        geom = self._load_geometry()
+        if geom:
+            self._x11_position = (geom[0], geom[1])
+            self._desktop_size = (max(340, geom[2]), max(220, geom[3]))
+        else:
+            self._x11_position = (geometry.x + geometry.width - 420, geometry.y + 84)
+            self._desktop_size = (390, 286)
         self._x11_xid = GdkX11.X11Surface.get_xid(surface)
         self._x11_hints = X11DesktopHints()
-        self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position)
+        self.set_default_size(self._desktop_size[0], self._desktop_size[1])
+        self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position, self._desktop_size)
 
     def _on_map(self, *_):
         if self._x11_hints and self._x11_xid and not self._x11_map_reapply_scheduled:
@@ -269,7 +335,7 @@ class DesktopWidget(Gtk.Window):
         return True
 
     def _reapply_x11_hints(self):
-        self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position)
+        self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position, self._desktop_size)
         return False
 
     def refresh(self):
@@ -280,8 +346,8 @@ class DesktopWidget(Gtk.Window):
             child = next_child
         now = datetime.now()
 
-        # Differentiated, explicit drag handle area
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Differentiated, explicit drag handle area using CenterBox for perfect balance
+        header = Gtk.CenterBox()
         header.add_css_class("desktop-drag-area")
         header.set_cursor_from_name("grab")
         header.set_tooltip_text("按住此处拖动桌面卡片")
@@ -294,38 +360,42 @@ class DesktopWidget(Gtk.Window):
         header.add_controller(drag)
 
         brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, valign=Gtk.Align.CENTER)
-        brand_pill = Gtk.Label(label="时序")
         brand_pill = Gtk.Label(label="DayLine")
         brand_pill.add_css_class("desktop-brand-pill")
         brand_box.append(brand_pill)
-        header.append(brand_box)
+        header.set_start_widget(brand_box)
 
-        grip = Gtk.Label(label="━ ━ ━", hexpand=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        grip.add_css_class("desktop-drag-grip")
-        header.append(grip)
-        # Center: Current time replacing the previous 3 horizontal lines
+        # Center: Current time (strictly centered, 3 horizontal lines removed)
         current_time = Gtk.Label(
             label=now.strftime("%H:%M"),
-            hexpand=True,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
         )
         current_time.add_css_class("desktop-drag-time")
         current_time.set_tooltip_text("当前时间 · 按住此处拖动卡片")
-        header.append(current_time)
+        header.set_center_widget(current_time)
 
         weekday = "一二三四五六日"[now.weekday()]
-        date = Gtk.Label(label=f"{now:%m月%d日} 周{weekday}", xalign=1, valign=Gtk.Align.CENTER)
+        date = Gtk.Label(label=f"{now:%m月%d日} 周{weekday}", halign=Gtk.Align.END, valign=Gtk.Align.CENTER)
         date.add_css_class("desktop-date")
-        header.append(date)
+        header.set_end_widget(date)
 
         self._root.append(header)
 
-        intro = Gtk.Label(label="接下来的安排", xalign=0, margin_start=18, margin_top=10, margin_bottom=2)
+        intro = Gtk.Label(label="接下来的安排", xalign=0, margin_start=18, margin_top=8, margin_bottom=2)
         intro.add_css_class("desktop-subtitle")
         self._root.append(intro)
 
-        events = self.store.upcoming(2, now=now)
+        # Scrollable events area so when resized larger or when many events exist, they all display!
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        scroll.add_css_class("desktop-events-scroll")
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_margin_bottom(6)
+        events_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        scroll.set_child(events_container)
+
+        events = self.store.upcoming(15, now=now)
         if events:
             for event in events:
                 row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -342,15 +412,17 @@ class DesktopWidget(Gtk.Window):
                 text.append(subtitle)
                 row.append(time_badge)
                 row.append(text)
-                self._root.append(row)
+                events_container.append(row)
         else:
             empty_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=18, margin_top=14, margin_bottom=8)
             empty_label = Gtk.Label(label="今天还没有待办，给自己留一点空白。", xalign=0)
             empty_label.add_css_class("desktop-event-detail")
             empty_box.append(empty_label)
-            self._root.append(empty_box)
+            events_container.append(empty_box)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=12, margin_bottom=14, margin_start=14, margin_end=14)
+        self._root.append(scroll)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=6, margin_bottom=10, margin_start=14, margin_end=12)
         new = Gtk.Button(label="＋ 新建")
         new.add_css_class("desktop-new")
         new.connect("clicked", lambda *_: self.create_event())
@@ -365,16 +437,32 @@ class DesktopWidget(Gtk.Window):
         settings_button.add_css_class("desktop-action-btn")
         settings_button.connect("clicked", lambda *_: self.open_settings() if self.open_settings else None)
 
-        quit_button = Gtk.Button(icon_name="application-exit-symbolic", tooltip_text="退出时序")
         quit_button = Gtk.Button(icon_name="application-exit-symbolic", tooltip_text="退出 DayLine")
         quit_button.add_css_class("desktop-action-btn")
         quit_button.connect("clicked", lambda *_: self.quit_app())
+
+        # Resize grip in bottom-right corner
+        resize_grip = Gtk.Box(valign=Gtk.Align.CENTER, halign=Gtk.Align.END)
+        resize_grip.add_css_class("desktop-resize-handle")
+        resize_grip.set_cursor_from_name("se-resize")
+        resize_grip.set_tooltip_text("拖拽调整大小")
+        resize_icon = Gtk.Label(label="⋰")
+        resize_icon.add_css_class("desktop-resize-icon")
+        resize_grip.append(resize_icon)
+        self._resize_grip = resize_grip
+
+        resize_drag = Gtk.GestureDrag(button=1)
+        resize_drag.connect("drag-begin", self._begin_resize)
+        resize_drag.connect("drag-update", self._update_resize)
+        resize_drag.connect("drag-end", self._end_resize)
+        resize_grip.add_controller(resize_drag)
 
         actions.append(new)
         actions.append(open_button)
         actions.append(spacer)
         actions.append(settings_button)
         actions.append(quit_button)
+        actions.append(resize_grip)
         self._root.append(actions)
 
         if self.get_display().__class__.__module__.endswith("GdkWayland"):
@@ -420,3 +508,47 @@ class DesktopWidget(Gtk.Window):
         GLib.timeout_add(150, self._save_position)
         self._drag_origin = None
         self._drag_pointer_origin = None
+
+    def _begin_resize(self, gesture, x, y):
+        if self._resize_grip:
+            self._resize_grip.add_css_class("resizing")
+        if self._x11_hints and self._x11_xid:
+            geom = self._x11_hints.geometry(self._x11_xid)
+            if geom:
+                self._resize_start_size = (geom[2], geom[3])
+            else:
+                self._resize_start_size = (self.get_width(), self.get_height())
+            self._resize_pointer_origin = self._x11_hints.pointer_position()
+            return
+        surface = self.get_surface()
+        device = gesture.get_current_event_device()
+        if isinstance(surface, Gdk.Toplevel) and device is not None:
+            surface.begin_resize(
+                Gdk.SurfaceEdge.SOUTH_EAST,
+                device,
+                gesture.get_current_button(),
+                x,
+                y,
+                gesture.get_current_event_time(),
+            )
+
+    def _update_resize(self, _gesture, _offset_x, _offset_y):
+        if not self._x11_hints or not self._x11_xid or not self._resize_start_size or not self._resize_pointer_origin:
+            return
+        pointer = self._x11_hints.pointer_position()
+        if pointer is None:
+            return
+        dx = pointer[0] - self._resize_pointer_origin[0]
+        dy = pointer[1] - self._resize_pointer_origin[1]
+        new_w = max(340, min(800, self._resize_start_size[0] + dx))
+        new_h = max(220, min(1000, self._resize_start_size[1] + dy))
+        self._desktop_size = (new_w, new_h)
+        self._x11_hints.resize(self._x11_xid, new_w, new_h)
+        self.set_default_size(new_w, new_h)
+
+    def _end_resize(self, *_):
+        if self._resize_grip:
+            self._resize_grip.remove_css_class("resizing")
+        self._resize_start_size = None
+        self._resize_pointer_origin = None
+        GLib.timeout_add(150, self._save_position)

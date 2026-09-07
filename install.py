@@ -50,7 +50,6 @@ def install(prefix, config, autostart=False):
                            'X-GNOME-Autostart-enabled=true\n')
     if shutil.which('update-desktop-database'):
         subprocess.run(['update-desktop-database', str(desktop.parent)], check=False)
-    print(f'已安装：{launcher}\n可从应用列表打开「时序日程」。')
     print(f'已安装：{launcher}\n可从应用列表打开「DayLine」。')
     if autostart:
         print('已启用登录后显示桌面日程。')
