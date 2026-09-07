@@ -5,6 +5,8 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 from datetime import datetime
+import os
+from pathlib import Path
 
 import gi
 gi.require_version("Gdk", "4.0")
@@ -58,7 +60,75 @@ class X11DesktopHints:
             self.lib.XSendEvent.restype = ctypes.c_int
             self.lib.XFlush.argtypes = [ctypes.c_void_p]
             self.lib.XMoveWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int]
+            self.lib.XQueryPointer.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong,
+                ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_uint),
+            ]
+            self.lib.XQueryPointer.restype = ctypes.c_int
+            self.lib.XTranslateCoordinates.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                ctypes.c_int, ctypes.c_int,
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_ulong),
+            ]
+            self.lib.XTranslateCoordinates.restype = ctypes.c_int
             self.lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+
+    def position(self, xid: int) -> tuple[int, int] | None:
+        if not self.lib or not xid:
+            return None
+        display = self.lib.XOpenDisplay(None)
+        if not display:
+            return None
+        try:
+            x = ctypes.c_int()
+            y = ctypes.c_int()
+            child = ctypes.c_ulong()
+            ok = self.lib.XTranslateCoordinates(
+                display, xid, self.lib.XDefaultRootWindow(display), 0, 0,
+                ctypes.byref(x), ctypes.byref(y), ctypes.byref(child),
+            )
+            return (x.value, y.value) if ok else None
+        finally:
+            self.lib.XCloseDisplay(display)
+
+    def pointer_position(self) -> tuple[int, int] | None:
+        if not self.lib:
+            return None
+        display = self.lib.XOpenDisplay(None)
+        if not display:
+            return None
+        try:
+            root = self.lib.XDefaultRootWindow(display)
+            root_return = ctypes.c_ulong()
+            child_return = ctypes.c_ulong()
+            root_x = ctypes.c_int()
+            root_y = ctypes.c_int()
+            window_x = ctypes.c_int()
+            window_y = ctypes.c_int()
+            mask = ctypes.c_uint()
+            ok = self.lib.XQueryPointer(
+                display, root,
+                ctypes.byref(root_return), ctypes.byref(child_return),
+                ctypes.byref(root_x), ctypes.byref(root_y),
+                ctypes.byref(window_x), ctypes.byref(window_y), ctypes.byref(mask),
+            )
+            return (root_x.value, root_y.value) if ok else None
+        finally:
+            self.lib.XCloseDisplay(display)
+
+    def move(self, xid: int, position: tuple[int, int]) -> None:
+        display = self.lib.XOpenDisplay(None)
+        if not display:
+            return
+        try:
+            self.lib.XMoveWindow(display, xid, position[0], position[1])
+            self.lib.XFlush(display)
+        finally:
+            self.lib.XCloseDisplay(display)
 
     def apply(self, xid: int, position: tuple[int, int] | None = None) -> bool:
         if not self.lib or not xid:
@@ -129,6 +199,9 @@ class DesktopWidget(Gtk.Window):
         self._x11_xid = 0
         self._x11_position: tuple[int, int] | None = None
         self._x11_map_reapply_scheduled = False
+        self._drag_origin: tuple[int, int] | None = None
+        self._drag_pointer_origin: tuple[int, int] | None = None
+        self._position_file = self._default_position_file()
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_default_size(390, 286)
@@ -139,6 +212,28 @@ class DesktopWidget(Gtk.Window):
         self.set_child(self._root)
         self.refresh()
 
+    @staticmethod
+    def _default_position_file() -> Path:
+        config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        return config_home / "dayline" / "desktop-position"
+
+    def _load_position(self) -> tuple[int, int] | None:
+        try:
+            x, y = self._position_file.read_text(encoding="utf-8").strip().split(",", 1)
+            return int(x), int(y)
+        except (OSError, ValueError):
+            return None
+
+    def _save_position(self):
+        if not self._x11_hints or not self._x11_xid:
+            return False
+        position = self._x11_hints.position(self._x11_xid)
+        if position is not None:
+            self._x11_position = position
+            self._position_file.parent.mkdir(parents=True, exist_ok=True)
+            self._position_file.write_text(f"{position[0]},{position[1]}\n", encoding="utf-8")
+        return False
+
     def _on_realize(self, *_):
         surface = self.get_surface()
         display = self.get_display()
@@ -147,7 +242,7 @@ class DesktopWidget(Gtk.Window):
         monitor = display.get_monitors().get_item(0)
         geometry = monitor.get_geometry()
         # Keep it clear of the upper-left desktop icon area by default.
-        self._x11_position = (geometry.x + geometry.width - 420, geometry.y + 84)
+        self._x11_position = self._load_position() or (geometry.x + geometry.width - 420, geometry.y + 84)
         self._x11_xid = GdkX11.X11Surface.get_xid(surface)
         self._x11_hints = X11DesktopHints()
         self.hints_applied = self._x11_hints.apply(self._x11_xid, self._x11_position)
@@ -169,6 +264,12 @@ class DesktopWidget(Gtk.Window):
             child = next_child
         now = datetime.now()
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, margin_top=22, margin_start=24, margin_end=20)
+        header.set_cursor_from_name("grab")
+        drag = Gtk.GestureDrag(button=1)
+        drag.connect("drag-begin", self._begin_drag)
+        drag.connect("drag-update", self._update_drag)
+        drag.connect("drag-end", self._end_drag)
+        header.add_controller(drag)
         mark = Gtk.Label(label="时序", xalign=0, hexpand=True)
         mark.add_css_class("desktop-brand")
         weekday = "一二三四五六日"[now.weekday()]
@@ -206,3 +307,36 @@ class DesktopWidget(Gtk.Window):
             warning = Gtk.Label(label="Wayland 下桌面背景模式受系统限制，会以普通窗口显示。", wrap=True, xalign=0, margin_start=24, margin_end=20, margin_bottom=12)
             warning.add_css_class("desktop-event-detail")
             self._root.append(warning)
+
+    def _begin_drag(self, gesture, x, y):
+        if self._x11_hints and self._x11_xid:
+            self._drag_origin = self._x11_hints.position(self._x11_xid)
+            self._drag_pointer_origin = self._x11_hints.pointer_position()
+            return
+        surface = self.get_surface()
+        device = gesture.get_current_event_device()
+        if isinstance(surface, Gdk.Toplevel) and device is not None:
+            surface.begin_move(
+                device,
+                gesture.get_current_button(),
+                x,
+                y,
+                gesture.get_current_event_time(),
+            )
+
+    def _update_drag(self, _gesture, _offset_x, _offset_y):
+        if not self._x11_hints or not self._drag_origin or not self._drag_pointer_origin:
+            return
+        pointer = self._x11_hints.pointer_position()
+        if pointer is None:
+            return
+        position = (
+            self._drag_origin[0] + pointer[0] - self._drag_pointer_origin[0],
+            self._drag_origin[1] + pointer[1] - self._drag_pointer_origin[1],
+        )
+        self._x11_hints.move(self._x11_xid, position)
+
+    def _end_drag(self, *_):
+        GLib.timeout_add(150, self._save_position)
+        self._drag_origin = None
+        self._drag_pointer_origin = None
