@@ -11,56 +11,19 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .desktop import DesktopWidget
 from .reminders import ReminderService
+from .settings import AppSettings, get_settings_manager
+from .settings_dialog import open_settings_dialog
 from .storage import Event, EventStore
+from .theme import apply_theme, generate_css
 from .timeline import TimelineCanvas
 
 
-CSS = b"""
-window { background: #f8f8f2; color: #202b27; }
-.main-window .titlebar { background: #fbfbfe; }
-.sidebar { background: #edf1e9; border-right: 1px solid #d8dfd4; }
-.brand { font-size: 21px; font-weight: 800; color: #1d5145; }
-.section-title { font-size: 13px; font-weight: 700; color: #62677b; }
-.date-title { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
-.stat { font-size: 13px; color: #656a7c; }
-.timeline { background: #ffffff; border-radius: 16px; margin: 12px 22px 24px 8px; }
-.timeline-grid { background: #ffffff; }
-.timeline-hour-label { color: #9297a6; font-size: 12px; }
-.timeline-hour-line { background: #e1e5e6; min-height: 1px; }
-.timeline-half-line { background: #f0f1f3; min-height: 1px; }
-.timeline-gutter-line { background: #e1e5e6; min-width: 1px; }
-.timeline-now-line { background: #e55672; min-height: 2px; }
-.timeline-now-dot { color: #e55672; font-size: 12px; }
-.event-card { background: #e4f1ec; border-left: 4px solid #28735f; border-radius: 9px; padding: 3px 6px; margin: 0 8px 0 0; }
-.event-card button { min-width: 24px; min-height: 24px; padding: 0; }
-.event-card.done { opacity: .55; background: #eff1f3; border-left-color: #8e98a5; }
-.event-name { font-weight: 700; font-size: 13px; }
-.event-detail, .muted { color: #707587; font-size: 11px; }
-.now-line { color: #e55672; font-size: 12px; font-weight: 700; }
-.eyebrow { font-size: 12px; font-weight: 800; color: #28735f; text-transform: uppercase; }
-.reminder-title { font-size: 23px; font-weight: 800; }
-.desktop-widget { background: #183d35; color: #f8f8f2; border-radius: 20px; box-shadow: 0 12px 30px rgba(15,35,30,.35); }
-.desktop-brand { font-size: 20px; font-weight: 800; color: #ffffff; }
-.desktop-date { color: #bfc2d3; font-size: 12px; }
-.desktop-subtitle { color: #aeb2ca; font-size: 12px; }
-.desktop-time { color: #9bdfc6; font-weight: 800; min-width: 42px; }
-.desktop-event { color: #ffffff; font-weight: 700; }
-.desktop-event-detail { color: #b8bbca; font-size: 12px; }
-.desktop-new { background: #28735f; color: white; }
-.notice { background: #fff7db; color: #6d5716; border-radius: 8px; padding: 8px; }
-button.suggested-action, button.suggested-action:hover { background: #28735f; color: #ffffff; }
-calendar { background: #f9faf5; color: #26352f; border-radius: 10px; padding: 6px; }
-calendar:selected { background: #28735f; color: #ffffff; border-radius: 999px; }
-calendar.highlight { color: #28735f; font-weight: 800; }
-"""
-
+CSS = generate_css(AppSettings()).encode("utf-8")
 WEEKDAYS = "一二三四五六日"
 
 
 def load_css() -> None:
-    provider = Gtk.CssProvider()
-    provider.load_from_data(CSS)
-    Gtk.StyleContext.add_provider_for_display(Gtk.Widget.get_display(Gtk.Window()), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    apply_theme(get_settings_manager().current)
 
 
 class EventDialog(Gtk.Dialog):
@@ -134,46 +97,98 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(shell)
         titlebar = Adw.HeaderBar()
         titlebar.set_show_end_title_buttons(True)
+
+        settings_btn = Gtk.Button(icon_name="preferences-system-symbolic", tooltip_text="设置（自定义颜色与字体大小）")
+        settings_btn.add_css_class("flat")
+        settings_btn.connect("clicked", lambda *_: self.get_application().open_settings())
+        titlebar.pack_end(settings_btn)
+
         minimize = Gtk.Button(label="收起到桌面", tooltip_text="关闭编辑窗口，保留桌面日程与提醒")
+        minimize.add_css_class("flat")
         minimize.connect("clicked", lambda *_: self._hide())
         titlebar.pack_end(minimize)
         shell.append(titlebar)
+
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         outer.set_vexpand(True)
         shell.append(outer)
-        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin_top=24, margin_bottom=18, margin_start=18, margin_end=18)
-        sidebar.add_css_class("sidebar"); sidebar.set_size_request(244, -1); outer.append(sidebar)
+
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin_top=20, margin_bottom=18, margin_start=16, margin_end=16)
+        sidebar.add_css_class("sidebar")
+        sidebar.set_size_request(248, -1)
+        outer.append(sidebar)
+
+        brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
+        brand_icon = Gtk.Image(icon_name="x-office-calendar-symbolic")
         brand = Gtk.Label(label="时序 · Dayline", xalign=0)
-        brand.add_css_class("brand"); sidebar.append(brand)
-        today = Gtk.Button(label="今天")
+        brand.add_css_class("brand")
+        brand_box.append(brand_icon)
+        brand_box.append(brand)
+        sidebar.append(brand_box)
+
+        today = Gtk.Button(label="返回今天")
+        today.add_css_class("sidebar-today-btn")
         today.connect("clicked", lambda *_: self.goto_day(date.today()))
         sidebar.append(today)
+
         self.calendar = Gtk.Calendar()
         self.calendar.connect("day-selected", self._calendar_selected)
         sidebar.append(self.calendar)
-        side_title = Gtk.Label(label="下一项安排", xalign=0, margin_top=10)
-        side_title.add_css_class("section-title"); sidebar.append(side_title)
-        self.upcoming_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+
+        side_title = Gtk.Label(label="下一项安排", xalign=0, margin_top=8)
+        side_title.add_css_class("section-title")
+        sidebar.append(side_title)
+
+        self.upcoming_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         sidebar.append(self.upcoming_box)
-        spacer = Gtk.Box(vexpand=True); sidebar.append(spacer)
+
+        spacer = Gtk.Box(vexpand=True)
+        sidebar.append(spacer)
+
         desktop_note = Gtk.Label(label="关闭窗口后，日程仍会留在桌面。", wrap=True, xalign=0)
-        desktop_note.add_css_class("muted"); sidebar.append(desktop_note)
+        desktop_note.add_css_class("muted")
+        sidebar.append(desktop_note)
+
         quit_button = Gtk.Button(label="退出时序")
+        quit_button.add_css_class("flat")
         quit_button.connect("clicked", lambda *_: self.get_application().quit())
         sidebar.append(quit_button)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True); outer.append(body)
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=22, margin_start=20, margin_end=26, margin_bottom=6)
-        previous = Gtk.Button(icon_name="go-previous-symbolic"); previous.connect("clicked", lambda *_: self.goto_day(self.selected_day - timedelta(days=1)))
-        next_button = Gtk.Button(icon_name="go-next-symbolic"); next_button.connect("clicked", lambda *_: self.goto_day(self.selected_day + timedelta(days=1)))
-        now_button = Gtk.Button(label="现在"); now_button.connect("clicked", lambda *_: self.goto_day(date.today(), scroll_to_now=True))
-        self.date_label = Gtk.Label(xalign=0, hexpand=True); self.date_label.add_css_class("date-title")
-        self.stats_label = Gtk.Label(xalign=1); self.stats_label.add_css_class("stat")
-        add = Gtk.Button(label="＋ 新建事件"); add.add_css_class("suggested-action"); add.connect("clicked", lambda *_: self.open_event_dialog())
-        header.append(previous); header.append(next_button); header.append(now_button); header.append(self.date_label); header.append(self.stats_label); header.append(add); body.append(header)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        outer.append(body)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_top=18, margin_start=20, margin_end=24, margin_bottom=6)
+        nav_group = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        nav_group.add_css_class("linked")
+        previous = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="前一天")
+        previous.connect("clicked", lambda *_: self.goto_day(self.selected_day - timedelta(days=1)))
+        next_button = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="后一天")
+        next_button.connect("clicked", lambda *_: self.goto_day(self.selected_day + timedelta(days=1)))
+        now_button = Gtk.Button(label="回到现在", tooltip_text="定位到今日当前时刻")
+        now_button.connect("clicked", lambda *_: self.goto_day(date.today(), scroll_to_now=True))
+        nav_group.append(previous)
+        nav_group.append(next_button)
+        nav_group.append(now_button)
+        header.append(nav_group)
+
+        self.date_label = Gtk.Label(xalign=0, hexpand=True)
+        self.date_label.add_css_class("date-title")
+        self.stats_label = Gtk.Label(xalign=1)
+        self.stats_label.add_css_class("stat")
+        add = Gtk.Button(label="＋ 新建事件")
+        add.add_css_class("suggested-action")
+        add.connect("clicked", lambda *_: self.open_event_dialog())
+
+        header.append(self.date_label)
+        header.append(self.stats_label)
+        header.append(add)
+        body.append(header)
+
         self.timeline = TimelineCanvas(self._event_card)
         self.timeline.add_css_class("timeline")
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.scroll.set_child(self.timeline); body.append(self.scroll)
+        self.scroll.set_child(self.timeline)
+        body.append(self.scroll)
 
     def _hide(self, *_):
         self.set_visible(False)
@@ -225,40 +240,70 @@ class MainWindow(Adw.ApplicationWindow):
     def _rebuild_sidebar(self):
         child = self.upcoming_box.get_first_child()
         while child:
-            following = child.get_next_sibling(); self.upcoming_box.remove(child); child = following
-        for event in self.store.upcoming(3):
-            row = Gtk.Label(label=f"{event.starts_at:%m/%d %H:%M}  {event.title}", xalign=0, ellipsize=3)
-            row.add_css_class("muted"); self.upcoming_box.append(row)
+            following = child.get_next_sibling()
+            self.upcoming_box.remove(child)
+            child = following
+        upcoming = self.store.upcoming(3)
+        if upcoming:
+            for event in upcoming:
+                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                card.add_css_class("upcoming-mini-card")
+                time_lbl = Gtk.Label(label=f"{event.starts_at:%m/%d %H:%M}", xalign=0)
+                time_lbl.add_css_class("upcoming-mini-time")
+                title_lbl = Gtk.Label(label=event.title, xalign=0, ellipsize=3)
+                title_lbl.add_css_class("upcoming-mini-title")
+                card.append(time_lbl)
+                card.append(title_lbl)
+                self.upcoming_box.append(card)
+        else:
+            empty_lbl = Gtk.Label(label="暂无近期待办", xalign=0)
+            empty_lbl.add_css_class("muted")
+            self.upcoming_box.append(empty_lbl)
 
     def _rebuild_timeline(self, events: list[Event]):
         self.timeline.set_events(events, self.selected_day)
 
     def _event_card(self, event: Event, duration: int | None = None) -> Gtk.Widget:
-        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         card.add_css_class("event-card")
-        if event.completed: card.add_css_class("done")
+        if event.completed:
+            card.add_css_class("done")
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
-        title = Gtk.Label(label=event.title, xalign=0, ellipsize=3); title.add_css_class("event-name")
+        title = Gtk.Label(label=event.title, xalign=0, ellipsize=3)
+        title.add_css_class("event-name")
         start = f"昨日 {event.starts_at:%H:%M}" if event.starts_at.date() < self.selected_day else event.starts_at.strftime("%H:%M")
         end = f"次日 {event.ends_at:%H:%M}" if event.ends_at.date() > self.selected_day else event.ends_at.strftime("%H:%M")
         details = Gtk.Label(label=f"{start} — {end}" + (f"  ·  {event.notes}" if event.notes else ""), xalign=0, ellipsize=3)
-        details.add_css_class("event-detail"); text.append(title); text.append(details); card.append(text)
+        details.add_css_class("event-detail")
+        text.append(title)
+        text.append(details)
+        card.append(text)
         if duration is not None and duration < 45:
             title.set_text(f"{event.title} · {start}")
             details.set_visible(False)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2, valign=Gtk.Align.CENTER)
         done = Gtk.Button(icon_name="object-select-symbolic", tooltip_text="标记完成")
-        done.connect("clicked", lambda *_: self._complete(event.id)); card.append(done)
+        done.add_css_class("flat")
+        done.connect("clicked", lambda *_: self._complete(event.id))
+        actions.append(done)
         edit = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text="编辑")
-        edit.connect("clicked", lambda *_: self.open_event_dialog(event)); card.append(edit)
+        edit.add_css_class("flat")
+        edit.connect("clicked", lambda *_: self.open_event_dialog(event))
+        actions.append(edit)
         delete = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="删除")
-        delete.connect("clicked", lambda *_: self._delete(event.id)); card.append(delete)
+        delete.add_css_class("flat")
+        delete.connect("clicked", lambda *_: self._delete(event.id))
+        actions.append(delete)
+        card.append(actions)
         return card
 
     def _complete(self, event_id):
-        self.store.set_completed(event_id); self.refresh()
+        self.store.set_completed(event_id)
+        self.refresh()
 
     def _delete(self, event_id):
-        self.store.delete(event_id); self.refresh()
+        self.store.delete(event_id)
+        self.refresh()
 
 
 class DaylineApplication(Adw.Application):
@@ -268,16 +313,25 @@ class DaylineApplication(Adw.Application):
         self.desktop: DesktopWidget | None = None
         self.main_window: MainWindow | None = None
         self.reminders: ReminderService | None = None
+        self.settings_manager = None
         self.hold()
         self.connect("shutdown", self._shutdown)
 
     def do_startup(self):
         Adw.Application.do_startup(self)
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
-        css = Gtk.CssProvider(); css.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.settings_manager = get_settings_manager()
+        self.settings_manager.add_listener(self._on_settings_changed)
+        apply_theme(self.settings_manager.current)
         self.store = EventStore()
-        self.desktop = DesktopWidget(self, self.store, self.show_editor, self.new_event, self.quit)
+        self.desktop = DesktopWidget(
+            self,
+            self.store,
+            self.show_editor,
+            self.new_event,
+            self.quit,
+            open_settings=self.open_settings,
+        )
         self.main_window = MainWindow(self, self.store, self.desktop)
         self.reminders = ReminderService(self, self.store, self.refresh_all)
         GLib.idle_add(self._initial_reminder_check)
@@ -292,10 +346,13 @@ class DaylineApplication(Adw.Application):
     def do_command_line(self, command_line):
         args = command_line.get_arguments()[1:]
         if "--quit" in args:
-            self.quit(); return 0
+            self.quit()
+            return 0
         if "--desktop" in args:
-            self.show_desktop(); return 0
-        self.activate(); return 0
+            self.show_desktop()
+            return 0
+        self.activate()
+        return 0
 
     def show_editor(self):
         self.main_window.present()
@@ -312,10 +369,21 @@ class DaylineApplication(Adw.Application):
         self.show_editor()
         self.main_window.open_event_dialog()
 
+    def open_settings(self):
+        parent = self.main_window if self.main_window and self.main_window.get_visible() else None
+        open_settings_dialog(parent=parent)
+
+    def _on_settings_changed(self, _settings):
+        self.refresh_all()
+
     def refresh_all(self):
-        if self.main_window: self.main_window.refresh()
-        elif self.desktop: self.desktop.refresh()
+        if self.main_window:
+            self.main_window.refresh()
+        if self.desktop:
+            self.desktop.refresh()
 
     def _shutdown(self, *_):
-        if self.reminders: self.reminders.stop()
-        if self.store: self.store.close()
+        if self.reminders:
+            self.reminders.stop()
+        if self.store:
+            self.store.close()

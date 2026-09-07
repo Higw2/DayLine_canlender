@@ -191,9 +191,10 @@ class X11DesktopHints:
 
 
 class DesktopWidget(Gtk.Window):
-    def __init__(self, app, store: EventStore, open_editor, create_event, quit_app):
+    def __init__(self, app, store: EventStore, open_editor, create_event, quit_app, open_settings=None):
         super().__init__(application=app, title="时序 · 桌面日程")
         self.store, self.open_editor, self.create_event, self.quit_app = store, open_editor, create_event, quit_app
+        self.open_settings = open_settings
         self.hints_applied = False
         self._x11_hints: X11DesktopHints | None = None
         self._x11_xid = 0
@@ -202,6 +203,7 @@ class DesktopWidget(Gtk.Window):
         self._drag_origin: tuple[int, int] | None = None
         self._drag_pointer_origin: tuple[int, int] | None = None
         self._position_file = self._default_position_file()
+        self._drag_header: Gtk.Widget | None = None
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_default_size(390, 286)
@@ -263,52 +265,101 @@ class DesktopWidget(Gtk.Window):
             self._root.remove(child)
             child = next_child
         now = datetime.now()
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, margin_top=22, margin_start=24, margin_end=20)
+
+        # Differentiated, explicit drag handle area
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.add_css_class("desktop-drag-area")
         header.set_cursor_from_name("grab")
+        header.set_tooltip_text("按住此处拖动桌面卡片")
+        self._drag_header = header
+
         drag = Gtk.GestureDrag(button=1)
         drag.connect("drag-begin", self._begin_drag)
         drag.connect("drag-update", self._update_drag)
         drag.connect("drag-end", self._end_drag)
         header.add_controller(drag)
-        mark = Gtk.Label(label="时序", xalign=0, hexpand=True)
-        mark.add_css_class("desktop-brand")
+
+        brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, valign=Gtk.Align.CENTER)
+        brand_pill = Gtk.Label(label="时序")
+        brand_pill.add_css_class("desktop-brand-pill")
+        brand_box.append(brand_pill)
+        header.append(brand_box)
+
+        grip = Gtk.Label(label="━ ━ ━", hexpand=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        grip.add_css_class("desktop-drag-grip")
+        header.append(grip)
+
         weekday = "一二三四五六日"[now.weekday()]
-        date = Gtk.Label(label=f"{now:%m月%d日}  星期{weekday}", xalign=1)
+        date = Gtk.Label(label=f"{now:%m月%d日} 周{weekday}", xalign=1, valign=Gtk.Align.CENTER)
         date.add_css_class("desktop-date")
-        header.append(mark); header.append(date); self._root.append(header)
-        intro = Gtk.Label(label="接下来的安排", xalign=0, margin_start=24, margin_top=8)
-        intro.add_css_class("desktop-subtitle"); self._root.append(intro)
+        header.append(date)
+
+        self._root.append(header)
+
+        intro = Gtk.Label(label="接下来的安排", xalign=0, margin_start=18, margin_top=10, margin_bottom=2)
+        intro.add_css_class("desktop-subtitle")
+        self._root.append(intro)
+
         events = self.store.upcoming(2, now=now)
         if events:
             for event in events:
-                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_top=13, margin_start=24, margin_end=20)
-                time = Gtk.Label(label=event.starts_at.strftime("%H:%M"), valign=Gtk.Align.START)
-                time.add_css_class("desktop-time")
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.add_css_class("desktop-event-row")
+                time_badge = Gtk.Label(label=event.starts_at.strftime("%H:%M"), valign=Gtk.Align.CENTER)
+                time_badge.add_css_class("desktop-time-pill")
                 text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
                 name = Gtk.Label(label=event.title, xalign=0, ellipsize=3)
                 name.add_css_class("desktop-event")
                 day_prefix = "" if event.starts_at.date() == now.date() else f"{event.starts_at:%m/%d} · "
-                subtitle = Gtk.Label(label=f"{day_prefix}至 {event.ends_at:%H:%M}", xalign=0)
+                subtitle = Gtk.Label(label=f"{day_prefix}至 {event.ends_at:%H:%M}" + (f"  ·  {event.notes}" if event.notes else ""), xalign=0, ellipsize=3)
                 subtitle.add_css_class("desktop-event-detail")
-                text.append(name); text.append(subtitle); row.append(time); row.append(text); self._root.append(row)
+                text.append(name)
+                text.append(subtitle)
+                row.append(time_badge)
+                row.append(text)
+                self._root.append(row)
         else:
-            empty = Gtk.Label(label="今天还没有待办，给自己留一点空白。", xalign=0, margin_top=18, margin_start=24)
-            empty.add_css_class("desktop-event-detail"); self._root.append(empty)
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=18, margin_bottom=18, margin_start=24, margin_end=20)
+            empty_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=18, margin_top=14, margin_bottom=8)
+            empty_label = Gtk.Label(label="今天还没有待办，给自己留一点空白。", xalign=0)
+            empty_label.add_css_class("desktop-event-detail")
+            empty_box.append(empty_label)
+            self._root.append(empty_box)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=12, margin_bottom=14, margin_start=14, margin_end=14)
         new = Gtk.Button(label="＋ 新建")
         new.add_css_class("desktop-new")
         new.connect("clicked", lambda *_: self.create_event())
+
         open_button = Gtk.Button(label="打开日程")
+        open_button.add_css_class("desktop-action-btn")
         open_button.connect("clicked", lambda *_: self.open_editor())
+
+        spacer = Gtk.Box(hexpand=True)
+
+        settings_button = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text="偏好设置")
+        settings_button.add_css_class("desktop-action-btn")
+        settings_button.connect("clicked", lambda *_: self.open_settings() if self.open_settings else None)
+
         quit_button = Gtk.Button(icon_name="application-exit-symbolic", tooltip_text="退出时序")
+        quit_button.add_css_class("desktop-action-btn")
         quit_button.connect("clicked", lambda *_: self.quit_app())
-        actions.append(new); actions.append(open_button); actions.append(quit_button); self._root.append(actions)
+
+        actions.append(new)
+        actions.append(open_button)
+        actions.append(spacer)
+        actions.append(settings_button)
+        actions.append(quit_button)
+        self._root.append(actions)
+
         if self.get_display().__class__.__module__.endswith("GdkWayland"):
-            warning = Gtk.Label(label="Wayland 下桌面背景模式受系统限制，会以普通窗口显示。", wrap=True, xalign=0, margin_start=24, margin_end=20, margin_bottom=12)
+            warning = Gtk.Label(label="Wayland 下桌面背景模式受系统限制，会以普通窗口显示。", wrap=True, xalign=0, margin_start=18, margin_end=18, margin_bottom=10)
             warning.add_css_class("desktop-event-detail")
             self._root.append(warning)
 
     def _begin_drag(self, gesture, x, y):
+        if self._drag_header:
+            self._drag_header.set_cursor_from_name("grabbing")
+            self._drag_header.add_css_class("dragging")
         if self._x11_hints and self._x11_xid:
             self._drag_origin = self._x11_hints.position(self._x11_xid)
             self._drag_pointer_origin = self._x11_hints.pointer_position()
@@ -337,6 +388,9 @@ class DesktopWidget(Gtk.Window):
         self._x11_hints.move(self._x11_xid, position)
 
     def _end_drag(self, *_):
+        if self._drag_header:
+            self._drag_header.set_cursor_from_name("grab")
+            self._drag_header.remove_css_class("dragging")
         GLib.timeout_add(150, self._save_position)
         self._drag_origin = None
         self._drag_pointer_origin = None
