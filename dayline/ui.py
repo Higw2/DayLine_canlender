@@ -27,7 +27,16 @@ def load_css() -> None:
 
 
 class EventDialog(Gtk.Dialog):
-    def __init__(self, parent: Gtk.Window, store: EventStore, event: Event | None, saved, selected_day: date | None = None):
+    def __init__(
+        self,
+        parent: Gtk.Window,
+        store: EventStore,
+        event: Event | None,
+        saved,
+        selected_day: date | None = None,
+        initial_start: datetime | None = None,
+        initial_end: datetime | None = None,
+    ):
         super().__init__(title="编辑事件" if event else "新建事件", transient_for=parent, modal=True)
         self.store, self.event, self.saved = store, event, saved
         self.set_default_size(480, -1)
@@ -43,8 +52,8 @@ class EventDialog(Gtk.Dialog):
         else:
             default_start = (now + timedelta(minutes=30)).replace(minute=(now.minute // 30) * 30)
             if default_start <= now: default_start += timedelta(minutes=30)
-        start = event.starts_at if event else default_start
-        end = event.ends_at if event else start + timedelta(hours=1)
+        start = event.starts_at if event else initial_start or default_start
+        end = event.ends_at if event else initial_end or start + timedelta(hours=1)
         self.title_entry = Gtk.Entry(text=event.title if event else "", hexpand=True)
         self.start_entry = Gtk.Entry(text=start.strftime("%Y-%m-%d %H:%M"), hexpand=True)
         self.end_entry = Gtk.Entry(text=end.strftime("%Y-%m-%d %H:%M"), hexpand=True)
@@ -187,7 +196,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.append(add)
         body.append(header)
 
-        self.timeline = TimelineCanvas(self._event_card)
+        self.timeline = TimelineCanvas(self._event_card, self._create_event_from_range)
         self.timeline.add_css_class("timeline")
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.scroll.set_child(self.timeline)
@@ -227,9 +236,29 @@ class MainWindow(Adw.ApplicationWindow):
         adjustment.set_value(min(maximum, max(0, target)))
         return False
 
-    def open_event_dialog(self, event: Event | None = None):
-        dialog = EventDialog(self, self.store, event, self.refresh, self.selected_day)
+    def open_event_dialog(
+        self,
+        event: Event | None = None,
+        initial_start: datetime | None = None,
+        initial_end: datetime | None = None,
+    ):
+        dialog = EventDialog(
+            self,
+            self.store,
+            event,
+            self.refresh,
+            self.selected_day,
+            initial_start,
+            initial_end,
+        )
         dialog.present()
+
+    def _create_event_from_range(self, start_minute: int, end_minute: int) -> None:
+        day_start = datetime.combine(self.selected_day, time.min)
+        self.open_event_dialog(
+            initial_start=day_start + timedelta(minutes=start_minute),
+            initial_end=day_start + timedelta(minutes=end_minute),
+        )
 
     def refresh(self, *_):
         self.date_label.set_text(f"{self.selected_day:%Y年%m月%d日}  星期{WEEKDAYS[self.selected_day.weekday()]}")

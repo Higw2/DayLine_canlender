@@ -8,7 +8,14 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GObject, Gtk
 
 from dayline.desktop import DesktopWidget, X11DesktopHints
-from dayline.timeline import CLOCK_REFRESH_SECONDS, TimelineCanvas, assign_overlap_columns, clip_event_to_day
+from dayline.timeline import (
+    CLOCK_REFRESH_SECONDS,
+    TimelineCanvas,
+    assign_overlap_columns,
+    clip_event_to_day,
+    format_minute,
+    selection_range,
+)
 
 
 DAY = date(2026, 9, 7)
@@ -92,6 +99,16 @@ class TimelineLayoutTests(unittest.TestCase):
         ]
         placements = assign_overlap_columns(items)
         self.assertEqual([item.columns for item in placements], [2, 2])
+
+    def test_drag_selection_snaps_outward_to_quarter_hours(self):
+        self.assertEqual(selection_range(9 * 60 + 7, 10 * 60 + 22), (9 * 60, 10 * 60 + 30))
+
+    def test_drag_selection_works_upward(self):
+        self.assertEqual(selection_range(10 * 60 + 22, 9 * 60 + 7), (9 * 60, 10 * 60 + 30))
+
+    def test_drag_selection_at_day_end_uses_last_quarter_hour(self):
+        self.assertEqual(selection_range(1438, 1440), (1425, 1440))
+        self.assertEqual(format_minute(1440), "24:00")
 
     def test_desktop_geometry_load_and_resizability(self):
         import tempfile

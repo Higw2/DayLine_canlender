@@ -341,6 +341,21 @@ calendar header button {{
     color: #ef4444;
     font-size: {fs(12)}px;
 }}
+.timeline-selection {{
+    background: {hex_to_rgba_css(theme, 0.18)};
+    border: 2px solid {theme};
+    border-radius: 8px;
+}}
+.timeline-selection-label {{
+    color: {theme};
+    background: #ffffff;
+    border: 1px solid {hex_to_rgba_css(theme, 0.32)};
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: {fs(11)}px;
+    font-weight: 800;
+    font-feature-settings: "tnum";
+}}
 
 /* Event Cards */
 .event-card {{

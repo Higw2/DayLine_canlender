@@ -7,6 +7,7 @@ can be checked without starting a desktop session.
 from __future__ import annotations
 
 import heapq
+import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Callable, Iterable
@@ -26,6 +27,7 @@ MIN_EVENT_HEIGHT = 32
 TIME_GUTTER_WIDTH = 64
 TIMELINE_MIN_WIDTH = 460
 CLOCK_REFRESH_SECONDS = 60
+SELECTION_STEP_MINUTES = 15
 
 
 @dataclass(frozen=True)
@@ -160,18 +162,43 @@ def assign_overlap_columns(events: Iterable[ClippedEvent]) -> list[EventPlacemen
     return placements
 
 
+def selection_range(start_y: float, current_y: float) -> tuple[int, int]:
+    """Convert a vertical drag into a 15-minute, half-open time range."""
+
+    first = max(0, min(DAY_MINUTES, start_y / PX_PER_MINUTE))
+    second = max(0, min(DAY_MINUTES, current_y / PX_PER_MINUTE))
+    start = math.floor(min(first, second) / SELECTION_STEP_MINUTES) * SELECTION_STEP_MINUTES
+    end = math.ceil(max(first, second) / SELECTION_STEP_MINUTES) * SELECTION_STEP_MINUTES
+    start = min(start, DAY_MINUTES - SELECTION_STEP_MINUTES)
+    end = min(DAY_MINUTES, max(end, start + SELECTION_STEP_MINUTES))
+    return start, end
+
+
+def format_minute(minute: int) -> str:
+    """Format a minute offset, keeping the end-of-day value as 24:00."""
+
+    return "24:00" if minute == DAY_MINUTES else f"{minute // 60:02d}:{minute % 60:02d}"
+
+
 class TimelineCanvas(Gtk.Overlay):
     """A 24-hour, minute-positioned canvas with interactive event cards."""
 
-    def __init__(self, card_factory: Callable[[Event, int], Gtk.Widget] | None = None):
+    def __init__(
+        self,
+        card_factory: Callable[[Event, int], Gtk.Widget] | None = None,
+        range_selected: Callable[[int, int], None] | None = None,
+    ):
         super().__init__()
         self.card_factory = card_factory
+        self.range_selected = range_selected
         self.day: date = date.today()
         self.placements: list[EventPlacement] = []
         self._clock_source_id = 0
+        self._drag_start_y: float | None = None
         self.set_size_request(TIMELINE_MIN_WIDTH, DAY_HEIGHT)
         self.set_hexpand(True)
         self.set_vexpand(True)
+        self.set_tooltip_text("在空白处拖拽选择时间并创建事件")
 
         self.grid = Gtk.Fixed()
         self.grid.add_css_class("timeline-grid")
@@ -207,6 +234,27 @@ class TimelineCanvas(Gtk.Overlay):
         self.cards.set_hexpand(True)
         self.cards.set_vexpand(True)
         self.add_overlay(self.cards)
+
+        self.selection_layer = Gtk.Fixed()
+        self.selection_layer.set_can_target(False)
+        self.selection_layer.set_size_request(TIMELINE_MIN_WIDTH, DAY_HEIGHT)
+        self.selection_layer.set_hexpand(True)
+        self.selection_layer.set_vexpand(True)
+        self.selection_box = Gtk.Box()
+        self.selection_box.add_css_class("timeline-selection")
+        self.selection_box.set_visible(False)
+        self.selection_label = Gtk.Label()
+        self.selection_label.add_css_class("timeline-selection-label")
+        self.selection_label.set_visible(False)
+        self.selection_layer.put(self.selection_box, TIME_GUTTER_WIDTH + 4, 0)
+        self.selection_layer.put(self.selection_label, TIME_GUTTER_WIDTH + 12, 2)
+        self.add_overlay(self.selection_layer)
+
+        drag = Gtk.GestureDrag(button=1)
+        drag.connect("drag-begin", self._drag_begin)
+        drag.connect("drag-update", self._drag_update)
+        drag.connect("drag-end", self._drag_end)
+        self.add_controller(drag)
         self.connect("notify::width", self._width_changed)
         self.connect("map", self._on_map)
         self.connect("unmap", self._on_unmap)
@@ -223,6 +271,46 @@ class TimelineCanvas(Gtk.Overlay):
     def _refresh_clock(self) -> bool:
         self._update_now_line()
         return True
+
+    def _drag_begin(self, gesture: Gtk.GestureDrag, start_x: float, start_y: float) -> None:
+        if start_x <= TIME_GUTTER_WIDTH or self._point_is_event_card(start_x, start_y):
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+            return
+        self._drag_start_y = start_y
+        self._show_selection(*selection_range(start_y, start_y))
+
+    def _drag_update(self, _gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
+        if self._drag_start_y is None:
+            return
+        self._show_selection(*selection_range(self._drag_start_y, self._drag_start_y + offset_y))
+
+    def _drag_end(self, _gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
+        if self._drag_start_y is None:
+            return
+        start, end = selection_range(self._drag_start_y, self._drag_start_y + offset_y)
+        self._drag_start_y = None
+        self.selection_box.set_visible(False)
+        self.selection_label.set_visible(False)
+        if self.range_selected:
+            self.range_selected(start, end)
+
+    def _point_is_event_card(self, x: float, y: float) -> bool:
+        widget = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while widget and widget is not self:
+            if widget.get_parent() is self.cards:
+                return True
+            widget = widget.get_parent()
+        return False
+
+    def _show_selection(self, start: int, end: int) -> None:
+        width = max(self.get_width(), TIMELINE_MIN_WIDTH) - TIME_GUTTER_WIDTH - 8
+        y = start * PX_PER_MINUTE
+        self.selection_box.set_size_request(width, (end - start) * PX_PER_MINUTE)
+        self.selection_layer.move(self.selection_box, TIME_GUTTER_WIDTH + 4, y)
+        self.selection_label.set_text(f"{format_minute(start)} – {format_minute(end)}")
+        self.selection_layer.move(self.selection_label, TIME_GUTTER_WIDTH + 12, y + 2)
+        self.selection_box.set_visible(True)
+        self.selection_label.set_visible(True)
 
     def set_events(self, events: Iterable[Event], day: date) -> None:
         self.day = day
