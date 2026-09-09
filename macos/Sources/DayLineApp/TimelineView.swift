@@ -20,28 +20,14 @@ final class TimelineNSView: NSView {
     var open: ((CalendarEvent)->Void)?; var newRange: ((Date,Date)->Void)?; var complete: ((CalendarEvent)->Void)?
     private var dragStart: CGFloat?; private var cards: [(TimelineLayout.Placement, NSRect)] = []
     override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect); let gutter:CGFloat=64; let width=max(bounds.width,540)
-        // Background: Color or Image
-        if bgType == "image", !bgImagePath.isEmpty, let img = NSImage(contentsOfFile: bgImagePath) {
-            let imgSize = img.size
-            if imgSize.width > 0 && imgSize.height > 0 {
-                let scale = max(bounds.width / imgSize.width, bounds.height / imgSize.height)
-                let drawW = imgSize.width * scale; let drawH = imgSize.height * scale
-                let drawRect = NSRect(x: (bounds.width - drawW) / 2, y: (bounds.height - drawH) / 2, width: drawW, height: drawH)
-                img.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: CGFloat(bgOpacity))
-            }
-            NSColor(Color(hex: bgColor)).withAlphaComponent(CGFloat(max(0.08, 0.35 * (1.0 - bgOpacity)))).setFill()
-            bounds.fill()
-        } else {
-            let bgNSColor = NSColor(Color(hex: bgColor)).withAlphaComponent(CGFloat(bgOpacity))
-            bgNSColor.setFill()
-            bounds.fill()
-        }
 
         let isLight = Color(hex: bgColor).isLightColor && (bgType != "image")
-        let separatorCol = isLight ? NSColor.separatorColor : NSColor.white.withAlphaComponent(0.18)
-        let labelCol = isLight ? NSColor.secondaryLabelColor : NSColor.white.withAlphaComponent(0.72)
+        let separatorCol = isLight ? NSColor.separatorColor : NSColor.white.withAlphaComponent(0.22)
+        let labelCol = isLight ? NSColor.secondaryLabelColor : NSColor.white.withAlphaComponent(0.85)
 
         for minute in stride(from:0, through:1440, by:30) {
             let y=CGFloat(minute)

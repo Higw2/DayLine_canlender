@@ -11,10 +11,16 @@ public struct DayLineBackgroundView: View {
         self.cornerRadius = cornerRadius
     }
 
+    private var isLightBg: Bool {
+        if settings.bgType == "image" { return false }
+        return Color(hex: settings.bgColor).isLightColor
+    }
+
     public var body: some View {
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, isLightBg ? .light : .dark)
             if settings.bgType == "image",
                !settings.bgImagePath.isEmpty,
                let nsImage = NSImage(contentsOfFile: settings.bgImagePath) {
@@ -26,9 +32,6 @@ public struct DayLineBackgroundView: View {
                         .clipped()
                         .opacity(settings.bgOpacity)
                 }
-                Color(hex: settings.bgColor)
-                    .opacity(max(0.08, 0.35 * (1.0 - settings.bgOpacity)))
-                Color.black.opacity(0.12)
             } else {
                 Color(hex: settings.bgColor)
                     .opacity(settings.bgOpacity)
