@@ -1,0 +1,23 @@
+#!/bin/zsh
+set -euo pipefail
+base_dir="${0:A:h:h}"
+cd "$base_dir"
+SWIFTPM_MODULECACHE_OVERRIDE="$base_dir/.build/module-cache" CLANG_MODULE_CACHE_PATH="$base_dir/.build/clang-module-cache" swift build -c release --scratch-path "$base_dir/.build"
+app="$base_dir/build/DayLine.app"
+# This is an explicitly fixed, generated path under macos/build.
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$base_dir/.build/release/DayLine" "$app/Contents/MacOS/DayLine"
+cp "$base_dir/Info.plist" "$app/Contents/Info.plist"
+xattr -cr "$app"
+codesign --force --deep --sign - "$app"
+codesign --verify --deep --strict "$app"
+ditto -c -k --sequesterRsrc --keepParent "$app" "$base_dir/build/DayLine-macOS.zip"
+cp "$base_dir/build/DayLine-macOS.zip" "$base_dir/build/DayLine.app.zip"
+repo_dir="$(cd "$base_dir/.." && pwd)"
+mkdir -p "$repo_dir/dist"
+cp "$base_dir/build/DayLine-macOS.zip" "$repo_dir/dist/DayLine-macOS.zip"
+echo "已生成：$app"
+echo "可分发的无扩展属性包："
+echo "  - $base_dir/build/DayLine-macOS.zip"
+echo "  - $repo_dir/dist/DayLine-macOS.zip"

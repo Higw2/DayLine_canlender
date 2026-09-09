@@ -6,31 +6,19 @@
 
 **把今天的安排放回桌面。**
 
-原生桌面日历与日程提醒应用：现已同时支持 **Ubuntu 24.04** 与 **macOS 13+** 原生桌面环境。
+一款为 Ubuntu 24.04 打造的原生日程应用：Outlook 式日视图、桌面常驻卡片与可靠的到点提醒。
 
-*A native, private and lightweight desktop calendar for Ubuntu & macOS.*
+*A native, private and lightweight desktop calendar for Ubuntu.*
 
 [![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/desktop)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)](https://www.apple.com/macos)
 [![Python 3](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Swift 5.10](https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![GTK 4](https://img.shields.io/badge/GTK-4-4A86CF?logo=gtk&logoColor=white)](https://www.gtk.org/)
-[![GitHub stars](https://img.shields.io/github/stars/Higw2/DayLine-canlender-for-ubuntu24?style=social)](https://github.com/Higw2/DayLine-canlender-for-ubuntu24/stargazers)
+[![Tests](https://img.shields.io/badge/tests-27_passing-2E7D32)](#测试)
+[![GitHub stars](https://img.shields.io/github/stars/Higw2/ubuntu24-calendar?style=social)](https://github.com/Higw2/ubuntu24-calendar/stargazers)
 
-[下载安装包](#-发布版本下载) · [功能亮点](#功能亮点) · [平台目录](#项目结构) · [从源码运行](#从源码运行)
+[快速安装](#安装) · [功能亮点](#功能亮点) · [桌面兼容性](#桌面兼容性) · [参与贡献](#参与贡献)
 
 </div>
-
-## 📦 发布版本下载
-
-在 GitHub [Releases](https://github.com/Higw2/DayLine-canlender-for-ubuntu24/releases) 页面中，已为两套系统分别提供专属安装包：
-
-| 系统平台 | 下载包名称 | 说明与安装方式 |
-|---|---|---|
-| **macOS (13.0+)** | **`DayLine-macOS.zip`** | 解压得到 `DayLine.app`，直接拖入 `/Applications`（应用程序）即可使用。 |
-| **Ubuntu 24.04** | **`DayLine-Ubuntu-24.04.tar.gz`** | 解压后进入目录运行 `python3 install.py --autostart` 即可安装到应用菜单。 |
-
-两套版本均使用独立的本地存储，互不冲突，数据结构完全兼容。
 
 ![DayLine 主窗口](docs/screenshots/main-window.png)
 
@@ -196,32 +184,16 @@ python3 -m py_compile dayline/*.py tests/*.py install.py
 
 ## 项目结构
 
-整个仓库清晰划分为 Ubuntu 与 macOS 两个原生实现目录：
-
 ```text
-DayLine/
-├── ubuntu/                    # Ubuntu 24.04 原生版 (Python 3.12 / GTK4 / Libadwaita)
-│   ├── dayline/               # Python 应用模块 (界面、时间线、桌面卡片、提醒、存储)
-│   ├── packaging/             # 桌面图标与 SVG 资源
-│   ├── tests/                 # 单元测试集 (存储、时间线、设置)
-│   ├── install.py             # 免 sudo 用户级安装器
-│   ├── run.sh                 # Ubuntu 直接运行脚本
-│   ├── package.sh             # 打包为 DayLine-Ubuntu-24.04.tar.gz
-│   └── README.md              # Ubuntu 专属说明文档
-├── macos/                     # macOS 13+ 原生版 (Swift 5.10 / AppKit / SwiftUI)
-│   ├── Sources/DayLineApp/    # 原生应用主窗口、桌面卡片、提醒悬浮窗、单实例锁
-│   ├── Sources/DayLineCore/   # SQLite 存储、时间线吸附与重叠布局算法、模型
-│   ├── Sources/CSQLite/       # 系统 SQLite module map
-│   ├── Tests/DayLineCoreTests/# Swift 核心测试套件
-│   ├── scripts/build-app.sh   # 编译并生成 DayLine-macOS.zip
-│   ├── scripts/run.sh         # macOS 独立运行脚本
-│   ├── Package.swift          # SwiftPM 配置
-│   ├── README.md              # macOS 专属说明文档
-│   └── ACCEPTANCE.md          # macOS 全功能实机验收记录
-├── scripts/
-│   └── package-all.sh         # 一键同时打包 Ubuntu 与 macOS 发布包至 dist/
-├── docs/                      # 架构设计与截图资源
-└── run.sh                     # 根目录运行入口 (自动识别操作系统并启动对应版本)
+dayline/
+├── ui.py               # 主窗口与事件编辑器
+├── timeline.py         # 分钟级时间线和重叠布局
+├── desktop.py          # 桌面卡片与 X11 集成
+├── reminders.py        # 提醒调度与弹窗
+├── storage.py          # SQLite 事件存储
+├── settings.py         # 偏好设置持久化
+├── settings_dialog.py  # 设置窗口
+└── theme.py            # 动态主题生成
 ```
 
 ## Roadmap
