@@ -1,16 +1,8 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
 *.db
 *.db-shm
 *.db-wal
-build/
-dist/
-.DS_Store
-macos/.build/
-macos/build/
-
-# Local DayLine runtime and user-specific files
 settings.json
 desktop-position
 *.log
@@ -18,13 +10,9 @@ desktop-position
 .env.*
 !.env.example
 !.env.template
-
-# IDE metadata
 .idea/
 .vscode/
 *.iml
-
-# Private keys and certificates
 *.pem
 *.key
 *.crt
@@ -35,16 +23,12 @@ desktop-position
 credentials*.json
 auth*.json
 secrets/
-
-# SQLite variants
 *.sqlite
 *.sqlite3
-
-# Test output (never commit desktop captures or private fixtures)
-docs/screenshots/
 test-screenshots/
 test-output/
 test-artifacts/
 screenshots-local/
+docs/screenshots/
 *[Ss]creenshot*
 *[Ss]creen-[Ss]hot*

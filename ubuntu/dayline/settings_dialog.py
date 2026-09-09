@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import gi
+from pathlib import Path
+
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from .settings import AppSettings, get_settings_manager
-from .theme import FONT_SCALE_OPTIONS, PRESET_PALETTE, apply_theme
+from .theme import BACKGROUND_PALETTE, FONT_SCALE_OPTIONS, PRESET_PALETTE, apply_theme
 
 
 class SettingsDialog(Adw.PreferencesWindow):
@@ -25,6 +27,7 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.manager = get_settings_manager()
         self._updating_ui = False
         self._swatch_buttons: list[tuple[str, Gtk.Button]] = []
+        self._bg_swatch_buttons: list[tuple[str, Gtk.Button]] = []
 
         self._build_ui()
         self._sync_ui_from_settings(self.manager.current)
@@ -86,6 +89,65 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.desktop_theme_row.connect("notify::selected", self._on_desktop_theme_changed)
         color_group.add(self.desktop_theme_row)
 
+        background_group = Adw.PreferencesGroup(
+            title="背景与毛玻璃",
+            description="主窗口和桌面日程卡片共用背景。图片会自动裁切填充并使用柔和的毛玻璃模糊。",
+        )
+        page.add(background_group)
+
+        self.bg_type_row = Adw.ComboRow(title="背景样式", subtitle="纯色背景或图片背景")
+        self._bg_type_keys = ["color", "image"]
+        self.bg_type_row.set_model(Gtk.StringList.new(["纯色背景", "图片背景"]))
+        self.bg_type_row.connect("notify::selected", self._on_bg_type_changed)
+        background_group.add(self.bg_type_row)
+
+        bg_color_row = Adw.ActionRow(title="背景颜色", subtitle="选择 7 种预设颜色或自定义颜色")
+        bg_swatches = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for preset in BACKGROUND_PALETTE:
+            btn = Gtk.Button(tooltip_text=preset.name)
+            btn.set_size_request(28, 28)
+            btn.add_css_class("circular")
+            btn.add_css_class("color-swatch-btn")
+            provider = Gtk.CssProvider()
+            provider.load_from_data(
+                f"button.color-swatch-btn {{ background: {preset.hex_code}; min-width: 28px; min-height: 28px; }}".encode()
+            )
+            btn.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10)
+            btn.connect("clicked", lambda _b, c=preset.hex_code: self._on_bg_preset_clicked(c))
+            bg_swatches.append(btn)
+            self._bg_swatch_buttons.append((preset.hex_code, btn))
+        bg_dialog = Gtk.ColorDialog(title="选择自定义背景颜色", with_alpha=False)
+        self.bg_color_dialog_btn = Gtk.ColorDialogButton(dialog=bg_dialog, tooltip_text="自定义背景颜色")
+        self.bg_color_dialog_btn.connect("notify::rgba", self._on_bg_custom_color_chosen)
+        bg_swatches.append(self.bg_color_dialog_btn)
+        bg_color_row.add_suffix(bg_swatches)
+        background_group.add(bg_color_row)
+
+        image_row = Adw.ActionRow(title="背景图片", subtitle="界面只显示文件名，不展示本地路径")
+        image_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.bg_image_label = Gtk.Label(xalign=1, ellipsize=3)
+        self.bg_image_label.set_max_width_chars(18)
+        image_actions.append(self.bg_image_label)
+        self.bg_image_button = Gtk.Button(label="选择图片…")
+        self.bg_image_button.add_css_class("suggested-action")
+        self.bg_image_button.connect("clicked", self._choose_background_image)
+        image_actions.append(self.bg_image_button)
+        self.bg_clear_button = Gtk.Button(label="清除")
+        self.bg_clear_button.add_css_class("flat")
+        self.bg_clear_button.connect("clicked", self._clear_background_image)
+        image_actions.append(self.bg_clear_button)
+        image_row.add_suffix(image_actions)
+        background_group.add(image_row)
+
+        opacity_row = Adw.ActionRow(title="背景透明度", subtitle="20% 通透 · 100% 饱满")
+        self.bg_opacity_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.2, 1.0, 0.05)
+        self.bg_opacity_scale.set_digits(0)
+        self.bg_opacity_scale.set_hexpand(True)
+        self.bg_opacity_scale.set_size_request(180, -1)
+        self.bg_opacity_scale.connect("value-changed", self._on_bg_opacity_changed)
+        opacity_row.add_suffix(self.bg_opacity_scale)
+        background_group.add(opacity_row)
+
         # 2. Typography Group
         font_group = Adw.PreferencesGroup(
             title="文字与排版",
@@ -139,6 +201,18 @@ class SettingsDialog(Adw.PreferencesWindow):
                 idx = self._desktop_theme_keys.index(settings.desktop_theme)
                 self.desktop_theme_row.set_selected(idx)
 
+            current_bg = settings.bg_color.lower()
+            for hex_code, btn in self._bg_swatch_buttons:
+                btn.set_icon_name("object-select-symbolic" if hex_code.lower() == current_bg else "")
+            bg_rgba = Gdk.RGBA()
+            if bg_rgba.parse(settings.bg_color):
+                self.bg_color_dialog_btn.set_rgba(bg_rgba)
+            self.bg_type_row.set_selected(self._bg_type_keys.index(settings.bg_type))
+            self.bg_opacity_scale.set_value(settings.bg_opacity)
+            self.bg_image_label.set_text(Path(settings.bg_image_path).name if settings.bg_image_path else "未选择")
+            self.bg_image_button.set_label("更换图片…" if settings.bg_image_path else "选择图片…")
+            self.bg_clear_button.set_sensitive(bool(settings.bg_image_path))
+
             # Sync font scale combo
             closest_idx = min(
                 range(len(self._font_scales)),
@@ -175,6 +249,59 @@ class SettingsDialog(Adw.PreferencesWindow):
             theme_key = self._desktop_theme_keys[idx]
             self.manager.update(desktop_theme=theme_key)
             apply_theme(self.manager.current)
+
+    def _on_bg_type_changed(self, row, _pspec) -> None:
+        if self._updating_ui:
+            return
+        self.manager.update(bg_type=self._bg_type_keys[row.get_selected()])
+        apply_theme(self.manager.current)
+
+    def _on_bg_preset_clicked(self, hex_code: str) -> None:
+        if self._updating_ui:
+            return
+        self.manager.update(bg_color=hex_code, bg_type="color")
+        apply_theme(self.manager.current)
+        self._sync_ui_from_settings(self.manager.current)
+
+    def _on_bg_custom_color_chosen(self, btn, _pspec) -> None:
+        if self._updating_ui:
+            return
+        rgba = btn.get_rgba()
+        hex_code = f"#{round(rgba.red * 255):02x}{round(rgba.green * 255):02x}{round(rgba.blue * 255):02x}"
+        self.manager.update(bg_color=hex_code, bg_type="color")
+        apply_theme(self.manager.current)
+        self._sync_ui_from_settings(self.manager.current)
+
+    def _on_bg_opacity_changed(self, scale) -> None:
+        if self._updating_ui:
+            return
+        self.manager.update(bg_opacity=round(scale.get_value(), 2))
+        apply_theme(self.manager.current)
+
+    def _choose_background_image(self, _button) -> None:
+        dialog = Gtk.FileDialog(title="选择日历背景图片")
+        image_filter = Gtk.FileFilter()
+        image_filter.set_name("图片文件")
+        image_filter.add_mime_type("image/png")
+        image_filter.add_mime_type("image/jpeg")
+        image_filter.add_mime_type("image/webp")
+        image_filter.add_mime_type("image/gif")
+        dialog.set_default_filter(image_filter)
+        dialog.open(self, None, self._background_image_chosen, None)
+
+    def _background_image_chosen(self, dialog, result, _data) -> None:
+        try:
+            selected = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        self.manager.update(bg_image_path=selected.get_path(), bg_type="image")
+        apply_theme(self.manager.current)
+        self._sync_ui_from_settings(self.manager.current)
+
+    def _clear_background_image(self, _button) -> None:
+        self.manager.update(bg_image_path="", bg_type="color")
+        apply_theme(self.manager.current)
+        self._sync_ui_from_settings(self.manager.current)
 
     def _on_font_scale_changed(self, row, _pspec) -> None:
         if self._updating_ui:

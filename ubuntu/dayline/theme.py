@@ -29,6 +29,16 @@ PRESET_PALETTE: list[PaletteColor] = [
     PaletteColor("极简石板灰", "#475569"),
 ]
 
+BACKGROUND_PALETTE: list[PaletteColor] = [
+    PaletteColor("暗岩灰", "#1e242b"),
+    PaletteColor("曜石黑", "#121417"),
+    PaletteColor("静谧森", "#142820"),
+    PaletteColor("深海蓝", "#121b2b"),
+    PaletteColor("暗夜梅", "#2b141e"),
+    PaletteColor("温润米", "#f5f3ee"),
+    PaletteColor("极简白", "#ffffff"),
+]
+
 FONT_SCALE_OPTIONS: list[tuple[str, float]] = [
     ("小 (90%)", 0.9),
     ("标准 (100%)", 1.0),
@@ -173,7 +183,7 @@ def generate_css(settings: AppSettings) -> str:
     css = f"""
 /* Root & Window */
 window {{
-    background: #f8faf9;
+    background: transparent;
     color: #1f2937;
     font-size: {fs(13)}px;
 }}
@@ -184,7 +194,7 @@ window {{
 
 /* Sidebar */
 .sidebar {{
-    background: #edf1e9;
+    background: rgba(237, 241, 233, 0.88);
     border-right: 1px solid #d8dfd4;
     padding: 14px;
 }}
@@ -306,14 +316,14 @@ calendar header button {{
 
 /* Timeline Grid */
 .timeline {{
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.88);
     border-radius: 16px;
     margin: 10px 20px 22px 8px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
     border: 1px solid #e5e7eb;
 }}
 .timeline-grid {{
-    background: #ffffff;
+    background: transparent;
 }}
 .timeline-hour-label {{
     color: #9ca3af;
@@ -416,7 +426,7 @@ calendar header button {{
 
 /* Desktop Widget */
 .desktop-widget {{
-    background: {desktop_bg};
+    background: transparent;
     color: {desktop_fg};
     border-radius: 22px;
     border: 1px solid {desktop_border};

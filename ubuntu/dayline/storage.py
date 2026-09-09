@@ -96,7 +96,7 @@ class EventStore:
         self.connection.commit()
         return self.get(int(cursor.lastrowid))
 
-    def update_event(self, event_id: int, title: str, starts_at: datetime, ends_at: datetime, notes: str = "") -> Event:
+    def update_event(self, event_id: int, title: str, starts_at: datetime, ends_at: datetime, notes: str = "", *, now: datetime | None = None) -> Event:
         title, starts_at, ends_at = self.validate(title, starts_at, ends_at)
         old = self.get(event_id)
         if old is None:
@@ -104,7 +104,7 @@ class EventStore:
         # A title/note-only edit must not resurrect an already shown alert or erase
         # a user's snooze.  A genuinely changed future schedule is re-armed.
         schedule_changed = starts_at != old.starts_at or ends_at != old.ends_at
-        rearm = schedule_changed and starts_at > datetime.now() and not old.completed
+        rearm = schedule_changed and starts_at > (now or datetime.now()) and not old.completed
         alerted_at = None if rearm else old.alerted_at
         reminder_at = None if rearm else old.reminder_at
         self.connection.execute(

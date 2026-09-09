@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .desktop import DesktopWidget
+from .background import BackgroundSurface
 from .reminders import ReminderService
 from .settings import AppSettings, get_settings_manager
 from .settings_dialog import open_settings_dialog
@@ -103,8 +104,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh()
 
     def _build(self):
+        root = Gtk.Overlay()
+        self.set_content(root)
+        self._background = BackgroundSurface(get_settings_manager().current)
+        root.set_child(self._background)
         shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_content(shell)
+        root.add_overlay(shell)
         titlebar = Adw.HeaderBar()
         titlebar.set_show_end_title_buttons(True)
 
@@ -261,6 +266,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def refresh(self, *_):
+        self._background.set_settings(get_settings_manager().current)
         self.date_label.set_text(f"{self.selected_day:%Y年%m月%d日}  星期{WEEKDAYS[self.selected_day.weekday()]}")
         events = self.store.events_for_day(self.selected_day)
         active = sum(not event.completed for event in events)

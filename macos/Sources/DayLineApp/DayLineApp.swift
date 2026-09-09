@@ -334,25 +334,6 @@ struct SettingsView: View {
                                         }
                                     }
 
-                                    // Quick test button for science_gate.png in Downloads
-                                    let samplePath = ("/Users/holixxx/Downloads/science_gate.png" as NSString).expandingTildeInPath
-                                    if FileManager.default.fileExists(atPath: samplePath) {
-                                        HStack {
-                                            Label("发现测试图片：science_gate.png", systemImage: "sparkles")
-                                                .font(.caption)
-                                                .foregroundStyle(Color(hex: model.settings.themeColor))
-                                            Spacer()
-                                            Button("一键测试该图片") {
-                                                model.settings.bgImagePath = samplePath
-                                                model.settings.bgType = "image"
-                                                model.persistSettings()
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                        }
-                                        .padding(8)
-                                        .background(Color(hex: model.settings.themeColor).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                                    }
                                 }
                             }
 

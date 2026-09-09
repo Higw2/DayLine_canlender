@@ -43,9 +43,9 @@ class EventStoreTests(unittest.TestCase):
     def test_title_edit_preserves_snooze_but_time_edit_rearms(self):
         event = self.add(self.now + timedelta(hours=2))
         self.store.snooze(event.id, 10, now=self.now)
-        edited = self.store.update_event(event.id, "改名晨会", event.starts_at, event.ends_at, "备注")
+        edited = self.store.update_event(event.id, "改名晨会", event.starts_at, event.ends_at, "备注", now=self.now)
         self.assertIsNotNone(edited.reminder_at)
-        moved = self.store.update_event(event.id, "改名晨会", event.starts_at + timedelta(days=1), event.ends_at + timedelta(days=1), "备注")
+        moved = self.store.update_event(event.id, "改名晨会", event.starts_at + timedelta(days=1), event.ends_at + timedelta(days=1), "备注", now=self.now)
         self.assertIsNone(moved.reminder_at)
         self.assertIsNone(moved.alerted_at)
 

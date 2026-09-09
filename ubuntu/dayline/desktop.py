@@ -15,6 +15,8 @@ gi.require_version("GdkX11", "4.0")
 from gi.repository import Gdk, GdkX11, GLib, Gtk
 
 from .storage import EventStore
+from .background import BackgroundSurface
+from .settings import get_settings_manager
 
 
 class X11DesktopHints:
@@ -266,7 +268,11 @@ class DesktopWidget(Gtk.Window):
         self.connect("map", self._on_map)
         self.connect("unmap", self._on_unmap)
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.set_child(self._root)
+        self._background = BackgroundSurface(get_settings_manager().current)
+        self._surface = Gtk.Overlay()
+        self._surface.set_child(self._background)
+        self._surface.add_overlay(self._root)
+        self.set_child(self._surface)
         self.refresh()
 
     @staticmethod
@@ -339,6 +345,7 @@ class DesktopWidget(Gtk.Window):
         return False
 
     def refresh(self):
+        self._background.set_settings(get_settings_manager().current)
         child = self._root.get_first_child()
         while child:
             next_child = child.get_next_sibling()

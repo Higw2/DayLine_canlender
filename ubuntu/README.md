@@ -13,14 +13,12 @@
 [![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/desktop)
 [![Python 3](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK 4](https://img.shields.io/badge/GTK-4-4A86CF?logo=gtk&logoColor=white)](https://www.gtk.org/)
-[![Tests](https://img.shields.io/badge/tests-27_passing-2E7D32)](#测试)
+[![Tests](https://img.shields.io/badge/tests-31_passing-2E7D32)](#测试)
 [![GitHub stars](https://img.shields.io/github/stars/Higw2/ubuntu24-calendar?style=social)](https://github.com/Higw2/ubuntu24-calendar/stargazers)
 
 [快速安装](#安装) · [功能亮点](#功能亮点) · [桌面兼容性](#桌面兼容性) · [参与贡献](#参与贡献)
 
 </div>
-
-![DayLine 主窗口](docs/screenshots/main-window.png)
 
 ## 为什么是 DayLine？
 
@@ -30,27 +28,15 @@
 - **桌面常驻卡片**：查看近期安排和实时时钟，无需反复打开主窗口；支持拖动、缩放，并记住位置和尺寸。
 - **可靠提醒**：主窗口关闭后继续运行，到点同时显示应用内弹窗和系统通知；支持完成或延后 10 分钟。
 - **按自己的风格显示**：8 种强调色、自由调色板、3 种桌面卡片主题和 4 档字体缩放，修改后立即生效。
+- **背景随心切换**：纯色与本地图片背景、7 种背景预设、自定义颜色、20%–100% 透明度和应用内毛玻璃效果。
 - **本地优先**：日程和偏好设置只保存在本机，不需要账号、云服务或网络连接。
 - **轻量原生**：Python + GTK4 + Libadwaita，无 Electron、无 npm、无额外 pip 依赖。
-
-<table>
-  <tr>
-    <td width="46%" align="center"><strong>桌面日程卡片</strong></td>
-    <td width="54%" align="center"><strong>主题与排版设置</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/desktop-widget.png" alt="DayLine 桌面日程卡片"></td>
-    <td><img src="docs/screenshots/settings-dialog.png" alt="DayLine 偏好设置"></td>
-  </tr>
-</table>
 
 ## 功能亮点
 
 ### Outlook 式日视图
 
 DayLine 使用连续 24 小时时间轴，而不是简单的待办列表。09:15 开始的事件会出现在 09:15，持续两小时的事件会覆盖两小时高度。当多个事件发生在同一时间段，它们会自动分列，仍然可以分别查看和操作。在时间线空白处按住鼠标拖动，松开后会直接打开新建窗口，并自动填入所选的开始与结束时间。
-
-![重叠事件与持续时间](docs/screenshots/timeline-overlaps.png)
 
 ### 一眼可见的桌面日程
 
@@ -77,6 +63,8 @@ DayLine 使用连续 24 小时时间轴，而不是简单的待办列表。09:15
 - 深邃墨夜、跟随主题、清爽明亮三种桌面背景
 - 90%、100%、115%、130% 四档字体大小
 - 主窗口和桌面卡片实时同步更新
+- 纯色 / 图片背景随时切换，图片仅显示文件名
+- 图片使用 aspect-fill 裁切和柔和毛玻璃模糊
 
 ## 安装
 
@@ -155,7 +143,7 @@ Wayland 不允许普通应用自行进入 GNOME 桌面背景层，因此 DayLine
 
 ## 数据与隐私
 
-DayLine 不上传任何数据。事件保存在本地 SQLite 数据库中，主题、字体和桌面布局保存在本地配置文件中。
+DayLine 不上传任何数据。事件保存在本地 SQLite 数据库中，主题、字体、桌面布局及所选壁纸的本地路径保存在配置文件中。DayLine 不会复制或上传壁纸原文件。
 
 备份时先退出 DayLine，再复制：
 
@@ -178,9 +166,9 @@ python3 -m unittest discover -s tests -v
 python3 -m py_compile dayline/*.py tests/*.py install.py
 ```
 
-当前测试覆盖事件存储、提醒状态、跨日裁切、分钟定位、拖拽选区、重叠分列、短事件、主题生成、设置持久化及桌面窗口几何信息。当前版本共有 **30 项测试**。
+当前测试覆盖事件存储、提醒状态、跨日裁切、分钟定位、拖拽选区、重叠分列、短事件、背景配置、主题生成、设置持久化及桌面窗口几何信息。当前版本共有 **31 项测试**。
 
-详细的真实桌面验收记录见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。
+详细的真实桌面验收记录见 [docs/ACCEPTANCE.md](../docs/ACCEPTANCE.md)。
 
 ## 项目结构
 

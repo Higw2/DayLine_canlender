@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import string
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -25,6 +26,11 @@ class AppSettings:
     theme_color: str = "#28735f"
     font_scale: float = 1.0
     desktop_theme: str = "dark"  # "dark", "tinted", "light"
+    # Shared with the macOS build so settings.json can move between builds.
+    bg_color: str = "#1e242b"
+    bg_opacity: float = 0.90
+    bg_image_path: str = ""
+    bg_type: str = "color"  # "color" or "image"
 
     @classmethod
     def from_dict(cls, data: dict) -> AppSettings:
@@ -34,17 +40,30 @@ class AppSettings:
             font_scale = min(valid_font_scales, key=lambda s: abs(s - font_scale))
 
         theme_color = str(data.get("theme_color", "#28735f")).strip()
-        if not theme_color.startswith("#") or len(theme_color) not in (4, 7, 9):
+        if not theme_color.startswith("#") or len(theme_color) not in (4, 7, 9) or any(c not in string.hexdigits for c in theme_color[1:]):
             theme_color = "#28735f"
 
         desktop_theme = str(data.get("desktop_theme", "dark")).strip()
         if desktop_theme not in {"dark", "tinted", "light"}:
             desktop_theme = "dark"
 
+        bg_color = str(data.get("bg_color", "#1e242b")).strip()
+        if not bg_color.startswith("#") or len(bg_color) not in (4, 7, 9) or any(c not in string.hexdigits for c in bg_color[1:]):
+            bg_color = "#1e242b"
+        bg_opacity = max(0.1, min(1.0, float(data.get("bg_opacity", 0.90))))
+        bg_image_path = str(data.get("bg_image_path", "")).strip()
+        bg_type = str(data.get("bg_type", "color")).strip()
+        if bg_type not in {"color", "image"}:
+            bg_type = "color"
+
         return cls(
             theme_color=theme_color,
             font_scale=font_scale,
             desktop_theme=desktop_theme,
+            bg_color=bg_color,
+            bg_opacity=bg_opacity,
+            bg_image_path=bg_image_path,
+            bg_type=bg_type,
         )
 
 
@@ -96,6 +115,10 @@ class SettingsManager:
         theme_color: str | None = None,
         font_scale: float | None = None,
         desktop_theme: str | None = None,
+        bg_color: str | None = None,
+        bg_opacity: float | None = None,
+        bg_image_path: str | None = None,
+        bg_type: str | None = None,
     ) -> None:
         changed = False
         if theme_color is not None and theme_color != self._settings.theme_color:
@@ -106,6 +129,18 @@ class SettingsManager:
             changed = True
         if desktop_theme is not None and desktop_theme != self._settings.desktop_theme:
             self._settings.desktop_theme = desktop_theme
+            changed = True
+        if bg_color is not None and bg_color != self._settings.bg_color:
+            self._settings.bg_color = bg_color
+            changed = True
+        if bg_opacity is not None and abs(bg_opacity - self._settings.bg_opacity) > 0.001:
+            self._settings.bg_opacity = bg_opacity
+            changed = True
+        if bg_image_path is not None and bg_image_path != self._settings.bg_image_path:
+            self._settings.bg_image_path = bg_image_path
+            changed = True
+        if bg_type is not None and bg_type != self._settings.bg_type:
+            self._settings.bg_type = bg_type
             changed = True
 
         if changed:
@@ -122,6 +157,10 @@ class SettingsManager:
             theme_color=defaults.theme_color,
             font_scale=defaults.font_scale,
             desktop_theme=defaults.desktop_theme,
+            bg_color=defaults.bg_color,
+            bg_opacity=defaults.bg_opacity,
+            bg_image_path=defaults.bg_image_path,
+            bg_type=defaults.bg_type,
         )
 
 
