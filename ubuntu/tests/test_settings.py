@@ -3,7 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dayline.settings import AppSettings, SettingsManager
+from dayline.settings import (
+    SIDEBAR_RATIO_DEFAULT,
+    SIDEBAR_RATIO_MAX,
+    SIDEBAR_RATIO_MIN,
+    AppSettings,
+    SettingsManager,
+    clamp_sidebar_ratio,
+    split_position_for_width,
+)
 from dayline.theme import (
     BACKGROUND_PALETTE,
     FONT_SCALE_OPTIONS,
@@ -32,12 +40,21 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.bg_opacity, 0.90)
         self.assertEqual(settings.bg_image_path, "")
         self.assertEqual(settings.bg_type, "color")
+        self.assertEqual(settings.sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
+
+    def test_sidebar_ratio_is_clamped_and_legacy_settings_use_default(self):
+        self.assertEqual(AppSettings.from_dict({}).sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
+        self.assertEqual(clamp_sidebar_ratio(0.01), SIDEBAR_RATIO_MIN)
+        self.assertEqual(clamp_sidebar_ratio(0.99), SIDEBAR_RATIO_MAX)
+        self.assertEqual(AppSettings.from_dict({"sidebar_ratio": 0.36}).sidebar_ratio, 0.36)
+        self.assertEqual(split_position_for_width(0.36, 1000), 360)
+        self.assertEqual(split_position_for_width(0.01, 1000), round(1000 * SIDEBAR_RATIO_MIN))
 
     def test_load_and_save_settings(self):
         manager = SettingsManager(self.config_path)
         self.assertEqual(manager.current.theme_color, "#28735f")
 
-        manager.update(theme_color="#2563eb", font_scale=1.15, desktop_theme="tinted", bg_color="#2d3748", bg_opacity=0.75, bg_image_path="/tmp/background.png", bg_type="image")
+        manager.update(theme_color="#2563eb", font_scale=1.15, desktop_theme="tinted", bg_color="#2d3748", bg_opacity=0.75, bg_image_path="/tmp/background.png", bg_type="image", sidebar_ratio=0.36)
         self.assertTrue(self.config_path.is_file())
 
         # Load fresh in another manager instance
@@ -49,6 +66,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(manager2.current.bg_opacity, 0.75)
         self.assertEqual(manager2.current.bg_image_path, "/tmp/background.png")
         self.assertEqual(manager2.current.bg_type, "image")
+        self.assertEqual(manager2.current.sidebar_ratio, 0.36)
 
     def test_listener_notification(self):
         manager = SettingsManager(self.config_path)
@@ -85,6 +103,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(manager.current.font_scale, 1.0)
         self.assertEqual(manager.current.desktop_theme, "dark")
         self.assertEqual(manager.current.bg_type, "color")
+        self.assertEqual(manager.current.sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
 
     def test_background_settings_are_clamped_and_share_mac_keys(self):
         settings = AppSettings.from_dict({"bg_color": "#abc", "bg_opacity": 2, "bg_image_path": "/tmp/wallpaper.jpg", "bg_type": "image"})

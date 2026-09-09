@@ -13,7 +13,7 @@
 [![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04_LTS-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/desktop)
 [![Python 3](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![GTK 4](https://img.shields.io/badge/GTK-4-4A86CF?logo=gtk&logoColor=white)](https://www.gtk.org/)
-[![Tests](https://img.shields.io/badge/tests-31_passing-2E7D32)](#测试)
+[![Tests](https://img.shields.io/badge/tests-33_passing-2E7D32)](#测试)
 [![GitHub stars](https://img.shields.io/github/stars/Higw2/ubuntu24-calendar?style=social)](https://github.com/Higw2/ubuntu24-calendar/stargazers)
 
 [快速安装](#安装) · [功能亮点](#功能亮点) · [桌面兼容性](#桌面兼容性) · [参与贡献](#参与贡献)
@@ -25,6 +25,7 @@
 很多日历适合“打开后查看”，DayLine 更关注日程如何融入 Ubuntu 桌面。主窗口用于规划，桌面卡片负责陪伴，提醒窗口确保重要安排不会被错过。
 
 - **真正的日时间线**：事件按照开始分钟定位，卡片高度对应持续时间；在空白处拖拽即可按 15 分钟选中时段并创建事件。
+- **自由调整布局**：日历侧栏与时间表之间提供可拖动分隔条，比例会自动保存；窗口缩放和竖屏布局会按比例重新适配。
 - **桌面常驻卡片**：查看近期安排和实时时钟，无需反复打开主窗口；支持拖动、缩放，并记住位置和尺寸。
 - **可靠提醒**：主窗口关闭后继续运行，到点同时显示应用内弹窗和系统通知；支持完成或延后 10 分钟。
 - **按自己的风格显示**：8 种强调色、自由调色板、3 种桌面卡片主题和 4 档字体缩放，修改后立即生效。
@@ -37,6 +38,8 @@
 ### Outlook 式日视图
 
 DayLine 使用连续 24 小时时间轴，而不是简单的待办列表。09:15 开始的事件会出现在 09:15，持续两小时的事件会覆盖两小时高度。当多个事件发生在同一时间段，它们会自动分列，仍然可以分别查看和操作。在时间线空白处按住鼠标拖动，松开后会直接打开新建窗口，并自动填入所选的开始与结束时间。
+
+日历和时间表之间的分隔条可以直接拖动，按照自己的习惯分配两侧空间。这个比例会保存下来，横向缩放或切换到竖屏窗口时自动重新计算，时间线会使用当前可用宽度绘制。
 
 ### 一眼可见的桌面日程
 
@@ -166,7 +169,7 @@ python3 -m unittest discover -s tests -v
 python3 -m py_compile dayline/*.py tests/*.py install.py
 ```
 
-当前测试覆盖事件存储、提醒状态、跨日裁切、分钟定位、拖拽选区、重叠分列、短事件、背景配置、主题生成、设置持久化及桌面窗口几何信息。当前版本共有 **31 项测试**。
+当前测试覆盖事件存储、提醒状态、跨日裁切、分钟定位、拖拽选区、重叠分列、短事件、竖屏分栏、自适应宽度、背景配置、主题生成、设置持久化及桌面窗口几何信息。当前版本共有 **33 项测试**。
 
 详细的真实桌面验收记录见 [docs/ACCEPTANCE.md](../docs/ACCEPTANCE.md)。
 

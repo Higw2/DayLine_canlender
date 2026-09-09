@@ -15,6 +15,7 @@ from dayline.timeline import (
     clip_event_to_day,
     format_minute,
     selection_range,
+    should_stack_split,
 )
 
 
@@ -109,6 +110,11 @@ class TimelineLayoutTests(unittest.TestCase):
     def test_drag_selection_at_day_end_uses_last_quarter_hour(self):
         self.assertEqual(selection_range(1438, 1440), (1425, 1440))
         self.assertEqual(format_minute(1440), "24:00")
+
+    def test_split_stacks_for_portrait_and_narrow_windows(self):
+        self.assertTrue(should_stack_split(520, 900))
+        self.assertTrue(should_stack_split(700, 600))
+        self.assertFalse(should_stack_split(1060, 720))
 
     def test_desktop_geometry_load_and_resizability(self):
         import tempfile

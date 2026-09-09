@@ -25,9 +25,16 @@ DAY_MINUTES = 24 * 60
 DAY_HEIGHT = DAY_MINUTES * PX_PER_MINUTE
 MIN_EVENT_HEIGHT = 32
 TIME_GUTTER_WIDTH = 64
-TIMELINE_MIN_WIDTH = 460
+TIMELINE_MIN_WIDTH = 260
 CLOCK_REFRESH_SECONDS = 60
 SELECTION_STEP_MINUTES = 15
+SPLIT_STACK_BREAKPOINT = 960
+
+
+def should_stack_split(width: int, height: int) -> bool:
+    """Use a vertical split when a narrow or portrait window needs full width."""
+
+    return width < SPLIT_STACK_BREAKPOINT or width < height
 
 
 @dataclass(frozen=True)
@@ -303,7 +310,7 @@ class TimelineCanvas(Gtk.Overlay):
         return False
 
     def _show_selection(self, start: int, end: int) -> None:
-        width = max(self.get_width(), TIMELINE_MIN_WIDTH) - TIME_GUTTER_WIDTH - 8
+        width = max(1, (self.get_width() or TIMELINE_MIN_WIDTH) - TIME_GUTTER_WIDTH - 8)
         y = start * PX_PER_MINUTE
         self.selection_box.set_size_request(width, (end - start) * PX_PER_MINUTE)
         self.selection_layer.move(self.selection_box, TIME_GUTTER_WIDTH + 4, y)
@@ -341,7 +348,7 @@ class TimelineCanvas(Gtk.Overlay):
         self._layout_cards()
 
     def _layout_grid(self) -> None:
-        width = max(self.get_width(), TIMELINE_MIN_WIDTH)
+        width = self.get_width() or TIMELINE_MIN_WIDTH
         line_width = max(1, width - TIME_GUTTER_WIDTH)
         for minute, line in zip(range(0, DAY_MINUTES + 1, 30), self._horizontal_lines):
             line.set_size_request(line_width, 1)
@@ -364,7 +371,7 @@ class TimelineCanvas(Gtk.Overlay):
             self.grid.move(self._now_dot, TIME_GUTTER_WIDTH - 6, max(0, minute - 8))
 
     def _layout_cards(self) -> None:
-        width = max(self.get_width(), TIMELINE_MIN_WIDTH)
+        width = self.get_width() or TIMELINE_MIN_WIDTH
         content_width = width - TIME_GUTTER_WIDTH
         child = self.cards.get_first_child()
         for placement in self.placements:

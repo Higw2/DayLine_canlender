@@ -220,6 +220,22 @@ window {{
     background: {card_tint_hover};
     color: {theme};
 }}
+.main-split > separator {{
+    min-width: 10px;
+    background: rgba(31, 41, 55, 0.08);
+    border-left: 1px solid rgba(31, 41, 55, 0.10);
+    border-right: 1px solid rgba(255, 255, 255, 0.8);
+}}
+.main-split > separator:hover,
+.main-split > separator:active {{
+    background: {hex_to_rgba_css(theme, 0.45)};
+}}
+.main-split > separator:vertical {{
+    min-width: 0;
+    min-height: 10px;
+    border-top: 1px solid rgba(31, 41, 55, 0.10);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.8);
+}}
 .upcoming-mini-card {{
     background: rgba(255, 255, 255, 0.70);
     border-radius: 8px;

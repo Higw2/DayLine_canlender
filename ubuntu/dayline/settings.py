@@ -19,6 +19,23 @@ def default_settings_file() -> Path:
     return default_config_dir() / "settings.json"
 
 
+SIDEBAR_RATIO_DEFAULT = 0.35
+SIDEBAR_RATIO_MIN = 0.18
+SIDEBAR_RATIO_MAX = 0.55
+
+
+def clamp_sidebar_ratio(value: float) -> float:
+    """Keep the calendar pane useful while allowing a broad split range."""
+
+    return max(SIDEBAR_RATIO_MIN, min(SIDEBAR_RATIO_MAX, float(value)))
+
+
+def split_position_for_width(ratio: float, width: int) -> int:
+    """Return a split position that can be reapplied after a resize."""
+
+    return round(width * clamp_sidebar_ratio(ratio))
+
+
 @dataclass
 class AppSettings:
     """User preferences for appearance and behavior."""
@@ -31,6 +48,7 @@ class AppSettings:
     bg_opacity: float = 0.90
     bg_image_path: str = ""
     bg_type: str = "color"  # "color" or "image"
+    sidebar_ratio: float = SIDEBAR_RATIO_DEFAULT
 
     @classmethod
     def from_dict(cls, data: dict) -> AppSettings:
@@ -55,6 +73,7 @@ class AppSettings:
         bg_type = str(data.get("bg_type", "color")).strip()
         if bg_type not in {"color", "image"}:
             bg_type = "color"
+        sidebar_ratio = clamp_sidebar_ratio(data.get("sidebar_ratio", SIDEBAR_RATIO_DEFAULT))
 
         return cls(
             theme_color=theme_color,
@@ -64,6 +83,7 @@ class AppSettings:
             bg_opacity=bg_opacity,
             bg_image_path=bg_image_path,
             bg_type=bg_type,
+            sidebar_ratio=sidebar_ratio,
         )
 
 
@@ -119,6 +139,7 @@ class SettingsManager:
         bg_opacity: float | None = None,
         bg_image_path: str | None = None,
         bg_type: str | None = None,
+        sidebar_ratio: float | None = None,
     ) -> None:
         changed = False
         if theme_color is not None and theme_color != self._settings.theme_color:
@@ -142,6 +163,11 @@ class SettingsManager:
         if bg_type is not None and bg_type != self._settings.bg_type:
             self._settings.bg_type = bg_type
             changed = True
+        if sidebar_ratio is not None:
+            sidebar_ratio = clamp_sidebar_ratio(sidebar_ratio)
+            if abs(sidebar_ratio - self._settings.sidebar_ratio) > 0.001:
+                self._settings.sidebar_ratio = sidebar_ratio
+                changed = True
 
         if changed:
             self.save()
@@ -161,6 +187,7 @@ class SettingsManager:
             bg_opacity=defaults.bg_opacity,
             bg_image_path=defaults.bg_image_path,
             bg_type=defaults.bg_type,
+            sidebar_ratio=defaults.sidebar_ratio,
         )
 
 
