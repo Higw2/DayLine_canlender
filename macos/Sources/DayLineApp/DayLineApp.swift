@@ -4,8 +4,10 @@ import UserNotifications
 import ServiceManagement
 import DayLineCore
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private lazy var model = DayLineModel()
+    private let updater = UpdateController()
     private var mainWindow: NSWindow!
     private var desktop: DesktopPanel!
     private var reminderTimer: Timer?
@@ -24,25 +26,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         createWindows(); setupMenu(); model.reload()
-        checkReminders(); reminderTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.checkReminders() }
+        updater.configure { [weak self] in self?.model.settings ?? AppSettings() }
+        checkReminders(); reminderTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkReminders() } }
         if requested == "desktop" { hideToDesktop() } else { showMain() }
     }
     func applicationWillTerminate(_ notification: Notification) { reminderTimer?.invalidate(); lock = nil }
     private func createWindows() {
         mainWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         mainWindow.title = "DayLine"; mainWindow.center(); mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
-        mainWindow.contentView = NSHostingView(rootView: MainView(model: model, showDesktop: { [weak self] in self?.hideToDesktop() }, quit: { NSApp.terminate(nil) }))
+        mainWindow.contentView = NSHostingView(rootView: MainView(model: model, updater: updater, showDesktop: { [weak self] in self?.hideToDesktop() }, quit: { NSApp.terminate(nil) }))
         desktop = DesktopPanel(model: model, openMain: { [weak self] in self?.showMain() }, newEvent: { [weak self] in self?.showMain(); self?.model.presentNewEvent() }, settings: { [weak self] in self?.showSettings() }, quit: { NSApp.terminate(nil) })
     }
     private func setupMenu() {
         let menu = NSMenu(); let app = NSMenuItem(); menu.addItem(app); let appMenu = NSMenu(); app.submenu = appMenu
         appMenu.addItem(withTitle: "显示 DayLine", action: #selector(showMainAction), keyEquivalent: "o").target = self
         appMenu.addItem(withTitle: "显示桌面卡片", action: #selector(showDesktopAction), keyEquivalent: "d").target = self
+        appMenu.addItem(withTitle: "检查更新…", action: #selector(checkForUpdatesAction), keyEquivalent: "").target = self
         appMenu.addItem(.separator()); appMenu.addItem(withTitle: "退出 DayLine", action: #selector(quitAction), keyEquivalent: "q").target = self
         NSApp.mainMenu = menu
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); statusItem = item; item.button?.title = "◷"; let status = NSMenu(); status.addItem(withTitle: "打开 DayLine", action: #selector(showMainAction), keyEquivalent: "").target = self; status.addItem(withTitle: "新建事件", action: #selector(newEventAction), keyEquivalent: "").target = self; status.addItem(.separator()); status.addItem(withTitle: "退出", action: #selector(quitAction), keyEquivalent: "").target = self; item.menu = status
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); statusItem = item; item.button?.title = "◷"; let status = NSMenu(); status.addItem(withTitle: "打开 DayLine", action: #selector(showMainAction), keyEquivalent: "").target = self; status.addItem(withTitle: "新建事件", action: #selector(newEventAction), keyEquivalent: "").target = self; status.addItem(withTitle: "检查更新…", action: #selector(checkForUpdatesAction), keyEquivalent: "").target = self; status.addItem(.separator()); status.addItem(withTitle: "退出", action: #selector(quitAction), keyEquivalent: "").target = self; item.menu = status
     }
-    @objc func showMainAction() { showMain() }; @objc func showDesktopAction() { hideToDesktop() }; @objc func newEventAction() { showMain(); model.presentNewEvent() }; @objc func quitAction() { NSApp.terminate(nil) }
+    @objc func showMainAction() { showMain() }; @objc func showDesktopAction() { hideToDesktop() }; @objc func newEventAction() { showMain(); model.presentNewEvent() }; @objc func checkForUpdatesAction() { showSettings(); updater.checkNow() }; @objc func quitAction() { NSApp.terminate(nil) }
     func showMain() { desktop.orderOut(nil); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     func hideToDesktop() { mainWindow.orderOut(nil); desktop.show() }
     func showSettings() { showMain(); model.showSettings = true }
@@ -88,7 +92,19 @@ final class DayLineModel: ObservableObject {
 
 struct MainView: View {
     @ObservedObject var model: DayLineModel
+    @ObservedObject var updater: UpdateController
     let showDesktop: () -> Void; let quit: () -> Void
+    @State private var displayedMonth: Date
+
+    init(model: DayLineModel, updater: UpdateController, showDesktop: @escaping () -> Void, quit: @escaping () -> Void) {
+        _model = ObservedObject(wrappedValue: model)
+        _updater = ObservedObject(wrappedValue: updater)
+        self.showDesktop = showDesktop
+        self.quit = quit
+        let calendar = MonthGridLayout.chineseCalendar()
+        _displayedMonth = State(initialValue: MonthGridLayout.monthStart(for: model.selectedDay, calendar: calendar))
+    }
+
     private var dayText: String { let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年MM月dd日 EEEE"; return f.string(from: model.selectedDay) }
     private var isLightBg: Bool {
         if model.settings.bgType == "image" { return false }
@@ -109,7 +125,13 @@ struct MainView: View {
             EventEditor(model: model).font(.system(size: 13 * model.settings.fontScale))
         }
         .sheet(isPresented: $model.showSettings) {
-            SettingsView(model: model)
+            SettingsView(model: model, updater: updater)
+        }
+        .alert("发现 DayLine \(updater.availableUpdate?.version.description ?? "新版本")", isPresented: $updater.shouldPresentUpdateAlert) {
+            Button("下载并安装") { updater.installAvailableUpdate() }
+            Button("稍后", role: .cancel) {}
+        } message: {
+            Text("新版本已发布。可以在应用内完成下载、校验、替换并自动重新打开。")
         }
         .alert("DayLine", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
             Button("好", role: .cancel) {}
@@ -122,10 +144,11 @@ struct MainView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("DayLine").font(.system(size: 23, weight: .bold)).foregroundStyle(Color(hex: model.settings.themeColor))
-                Button("返回今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }
+                Button("返回今天") { returnToToday() }
                     .buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
                 ResponsiveMonthCalendarView(
                     selectedDate: $model.selectedDay,
+                    displayedMonth: $displayedMonth,
                     accent: Color(hex: model.settings.themeColor),
                     fontScale: model.settings.fontScale
                 )
@@ -214,8 +237,16 @@ struct MainView: View {
         HStack(spacing: 6) {
             Button("‹") { model.go(-1) }.buttonStyle(.bordered)
             Button("›") { model.go(1) }.buttonStyle(.bordered)
-            Button("今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }.buttonStyle(.bordered)
+            Button("今天") { returnToToday() }.buttonStyle(.bordered)
         }
+    }
+
+    private func returnToToday() {
+        let calendar = MonthGridLayout.chineseCalendar()
+        let today = calendar.startOfDay(for: Date())
+        model.selectedDay = today
+        displayedMonth = MonthGridLayout.monthStart(for: today, calendar: calendar)
+        model.reload()
     }
 
     private var eventSummary: some View {
@@ -271,6 +302,7 @@ struct EventEditor: View {
 
 struct SettingsView: View {
     @ObservedObject var model: DayLineModel
+    @ObservedObject var updater: UpdateController
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
@@ -449,17 +481,87 @@ struct SettingsView: View {
                         }
                         .padding(6)
                     }
+
+                    GroupBox("软件更新") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("当前版本")
+                                Spacer()
+                                Text(updater.installedVersionText).foregroundStyle(.secondary)
+                            }
+
+                            Toggle("自动检查更新", isOn: Binding(get: {
+                                model.settings.automaticUpdatesEnabled
+                            }, set: { enabled in
+                                model.settings.automaticUpdatesEnabled = enabled
+                                model.persistSettings()
+                                updater.settingsDidChange()
+                            }))
+
+                            Picker("检查频率", selection: Binding(get: {
+                                model.settings.updateCheckInterval
+                            }, set: { interval in
+                                model.settings.updateCheckInterval = interval
+                                model.persistSettings()
+                                updater.settingsDidChange()
+                            })) {
+                                ForEach(UpdateCheckInterval.allCases) { interval in
+                                    Text(interval.title).tag(interval)
+                                }
+                            }
+                            .disabled(!model.settings.automaticUpdatesEnabled)
+
+                            HStack(spacing: 10) {
+                                if updater.isChecking || updater.isInstalling {
+                                    ProgressView().controlSize(.small)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(updater.statusText)
+                                    if let lastCheckedAt = updater.lastCheckedAt {
+                                        Text("上次检查：\(lastCheckedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Button("立即检查") { updater.checkNow() }
+                                    .disabled(updater.isChecking || updater.isInstalling)
+                            }
+
+                            if let release = updater.availableUpdate {
+                                Divider()
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("\(release.releaseName)（\(release.tag)）").font(.headline)
+                                    if !release.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text(release.notes).font(.caption).foregroundStyle(.secondary).lineLimit(5)
+                                    }
+                                    HStack {
+                                        Button("下载并安装") { updater.installAvailableUpdate() }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(Color(hex: model.settings.themeColor))
+                                            .disabled(updater.isInstalling)
+                                        Button("查看 Release") { updater.openReleasePage() }
+                                    }
+                                }
+                            }
+
+                            Text("自动检查只在 DayLine 运行时执行。发现新版本后，可直接在应用内下载、校验并安装。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(6)
+                    }
                 }
             }
 
             HStack {
-                Button("恢复默认设置") { model.resetSettings() }
+                Button("恢复默认设置") { model.resetSettings(); updater.settingsDidChange() }
                 Spacer()
                 Button("完成") { dismiss() }.buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
             }
         }
         .padding(24)
-        .frame(width: 530, height: 600)
+        .frame(width: 560, height: 680)
         .font(.system(size: 13 * model.settings.fontScale))
     }
 

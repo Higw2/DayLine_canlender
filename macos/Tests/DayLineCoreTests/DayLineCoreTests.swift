@@ -11,7 +11,7 @@ final class DayLineCoreTests: XCTestCase {
     func testShortEventsParticipateInOverlapColumns() { let d=date(7,0,0); let p=TimelineLayout.placements([event(1,date(7,15,0),date(7,15,5)),event(2,date(7,15,20),date(7,15,25))],on:d,calendar:calendar); XCTAssertEqual(p.map(\.columns),[2,2]); XCTAssertEqual(p.map(\.column),[0,1]) }
     func testConnectedOverlapAndEndpointReuse() { let d=date(7,0,0); let p=TimelineLayout.placements([event(1,date(7,9,0),date(7,10,0)),event(2,date(7,9,30),date(7,11,0)),event(3,date(7,10,30),date(7,12,0))],on:d,calendar:calendar); XCTAssertEqual(p.map(\.columns),[2,2,2]); XCTAssertEqual(p.map(\.column),[0,1,0]); let touching=TimelineLayout.placements([event(4,date(7,13,0),date(7,14,0)),event(5,date(7,14,0),date(7,15,0))],on:d,calendar:calendar); XCTAssertEqual(touching.map(\.columns),[1,1]) }
     func testStoreReminderRulesAndNotesOnlyEditPreservesSnooze() throws { let dir=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at:dir) }; let store=try EventStore(path:dir.appendingPathComponent("events.db")); let now=date(7,9,0); let e=try store.add(title:"未来",startsAt:date(7,10,0),endsAt:date(7,11,0),notes:"n",now:now); XCTAssertNil(e.alertedAt); try store.snooze(e.id,now:now); let snoozed=try store.get(e.id)!; _=try store.update(id:e.id,title:"未来改名",startsAt:e.startsAt,endsAt:e.endsAt,notes:"备注",now:now); XCTAssertEqual(try store.get(e.id)!.reminderAt,snoozed.reminderAt); let past=try store.add(title:"过去",startsAt:date(7,8,0),endsAt:date(7,8,30),now:now); XCTAssertNotNil(past.alertedAt); try store.complete(e.id,completed:true,now:now); try store.complete(e.id,completed:false,now:now); XCTAssertNil(try store.get(e.id)!.alertedAt) }
-    func testSettingsUsesDefaultsForPartialOrInvalidFile() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); try "{\"theme_color\":\"bad\",\"font_scale\":99}".data(using:.utf8)!.write(to:url); let settings=SettingsStore(path:url).current; XCTAssertEqual(settings.themeColor,"#28735f"); XCTAssertEqual(settings.fontScale,1); XCTAssertEqual(settings.desktopTheme,"dark"); XCTAssertEqual(settings.bgColor,"#1e242b"); XCTAssertEqual(settings.bgOpacity,0.90); XCTAssertEqual(settings.bgType,"color"); XCTAssertEqual(settings.bgImagePath,""); XCTAssertEqual(settings.sidebarRatio,Double(MainSplitLayout.defaultRatio)) }
+    func testSettingsUsesDefaultsForPartialOrInvalidFile() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); try "{\"theme_color\":\"bad\",\"font_scale\":99}".data(using:.utf8)!.write(to:url); let settings=SettingsStore(path:url).current; XCTAssertEqual(settings.themeColor,"#28735f"); XCTAssertEqual(settings.fontScale,1); XCTAssertEqual(settings.desktopTheme,"dark"); XCTAssertEqual(settings.bgColor,"#1e242b"); XCTAssertEqual(settings.bgOpacity,0.90); XCTAssertEqual(settings.bgType,"color"); XCTAssertEqual(settings.bgImagePath,""); XCTAssertEqual(settings.sidebarRatio,Double(MainSplitLayout.defaultRatio)); XCTAssertFalse(settings.automaticUpdatesEnabled); XCTAssertEqual(settings.updateCheckInterval,.daily) }
     func testBackgroundSettingsCustomizationAndPersistence() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); let imagePath=url.appendingPathComponent("background.png").path; let store=SettingsStore(path:url); var s=store.current; s.bgColor="#2d3748"; s.bgOpacity=0.75; s.bgType="image"; s.bgImagePath=imagePath; try store.save(s); let loaded=SettingsStore(path:url).current; XCTAssertEqual(loaded.bgColor,"#2d3748"); XCTAssertEqual(loaded.bgOpacity,0.75); XCTAssertEqual(loaded.bgType,"image"); XCTAssertEqual(loaded.bgImagePath,imagePath) }
     func testSidebarRatioSettingsClampAndRoundTrip() throws {
         let low=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
@@ -25,6 +25,26 @@ final class DayLineCoreTests: XCTestCase {
         let data=try JSONSerialization.jsonObject(with:Data(contentsOf:saved)) as! [String:Any]
         XCTAssertEqual(data["sidebar_ratio"] as? Double,0.42)
         XCTAssertEqual(SettingsStore(path:saved).current.sidebarRatio,0.42)
+    }
+    func testUpdateSettingsRoundTrip() throws {
+        let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let store=SettingsStore(path:url); var settings=store.current
+        settings.automaticUpdatesEnabled = true; settings.updateCheckInterval = .sixHours
+        try store.save(settings)
+        let loaded=SettingsStore(path:url).current
+        XCTAssertTrue(loaded.automaticUpdatesEnabled); XCTAssertEqual(loaded.updateCheckInterval,.sixHours)
+    }
+    func testSemanticVersionParsingAndOrdering() {
+        XCTAssertEqual(SemanticVersion(parsing:"v1.2.3"),SemanticVersion(1,2,3))
+        XCTAssertEqual(SemanticVersion(parsing:"DayLine 2.0.1 macOS"),SemanticVersion(2,0,1))
+        XCTAssertNil(SemanticVersion(parsing:"Macos_version"))
+        XCTAssertTrue(SemanticVersion(1,10,0) > SemanticVersion(1,9,9))
+    }
+    func testUpdateVersionPolicyHandlesLegacyCurrentTagAndFutureVersions() {
+        XCTAssertNil(UpdateVersionPolicy.newerVersion(releaseTag:"Macos_version",releaseName:"Macos version",installedVersion:"1.0.0",currentReleaseTag:"Macos_version"))
+        XCTAssertEqual(UpdateVersionPolicy.newerVersion(releaseTag:"v1.0.1",releaseName:nil,installedVersion:"1.0.0",currentReleaseTag:"Macos_version"),SemanticVersion(1,0,1))
+        XCTAssertNil(UpdateVersionPolicy.newerVersion(releaseTag:"v0.9.9",releaseName:nil,installedVersion:"1.0.0",currentReleaseTag:"Macos_version"))
+        XCTAssertNil(UpdateVersionPolicy.newerVersion(releaseTag:"next",releaseName:"Next",installedVersion:"1.0.0",currentReleaseTag:"Macos_version"))
     }
     func testMainSplitLayoutDirectionAndPixelLimits() {
         XCTAssertFalse(MainSplitLayout.shouldStack(width:960,height:700))
@@ -62,6 +82,17 @@ final class DayLineCoreTests: XCTestCase {
         XCTAssertEqual(sundayFirst.dateComponents([.year, .month, .day], from: dates.first!), DateComponents(year: 2024, month: 1, day: 28))
         XCTAssertTrue(dates.contains(february))
         XCTAssertEqual(sundayFirst.component(.weekday, from: dates.first!), 1)
+    }
+    func testMonthStartKeepsYearIdentityAcrossPastAndFutureMonths() {
+        let calendar = MonthGridLayout.chineseCalendar(timeZone: TimeZone(identifier: "America/Los_Angeles")!)
+        let today = calendar.date(from: DateComponents(year: 2026, month: 9, day: 10, hour: 13))!
+        let past = calendar.date(from: DateComponents(year: 2025, month: 9, day: 25, hour: 13))!
+        let future = calendar.date(from: DateComponents(year: 2027, month: 9, day: 2, hour: 13))!
+        let todayMonth = MonthGridLayout.monthStart(for: today, calendar: calendar)
+
+        XCTAssertEqual(calendar.dateComponents([.year, .month, .day], from: todayMonth), DateComponents(year: 2026, month: 9, day: 1))
+        XCTAssertFalse(calendar.isDate(MonthGridLayout.monthStart(for: past, calendar: calendar), equalTo: todayMonth, toGranularity: .month))
+        XCTAssertFalse(calendar.isDate(MonthGridLayout.monthStart(for: future, calendar: calendar), equalTo: todayMonth, toGranularity: .month))
     }
     func testMonthGridRowHeightRespondsToWidthAndFontScale() {
         XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 20, fontScale: 1), 28)

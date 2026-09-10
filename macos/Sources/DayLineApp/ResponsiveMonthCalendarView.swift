@@ -8,21 +8,20 @@ private struct MonthCalendarWidthKey: PreferenceKey {
 
 struct ResponsiveMonthCalendarView: View {
     @Binding var selectedDate: Date
+    @Binding var displayedMonth: Date
     let accent: Color
     let fontScale: Double
 
-    @State private var displayedMonth: Date
     @State private var availableWidth: CGFloat = 0
 
     private let calendar: Calendar
 
-    init(selectedDate: Binding<Date>, accent: Color, fontScale: Double) {
+    init(selectedDate: Binding<Date>, displayedMonth: Binding<Date>, accent: Color, fontScale: Double) {
         _selectedDate = selectedDate
+        _displayedMonth = displayedMonth
         self.accent = accent
         self.fontScale = fontScale
-        let calendar = MonthGridLayout.chineseCalendar()
-        self.calendar = calendar
-        _displayedMonth = State(initialValue: MonthGridLayout.monthStart(for: selectedDate.wrappedValue, calendar: calendar))
+        calendar = MonthGridLayout.chineseCalendar()
     }
 
     var body: some View {

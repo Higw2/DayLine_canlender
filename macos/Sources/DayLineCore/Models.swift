@@ -56,6 +56,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var bgImagePath: String = ""
     public var bgType: String = "color"
     public var sidebarRatio: Double = Double(MainSplitLayout.defaultRatio)
+    public var automaticUpdatesEnabled: Bool = false
+    public var updateCheckInterval: UpdateCheckInterval = .daily
     public init() {}
     enum CodingKeys: String, CodingKey {
         case themeColor = "theme_color"
@@ -67,6 +69,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case bgImagePath = "bg_image_path"
         case bgType = "bg_type"
         case sidebarRatio = "sidebar_ratio"
+        case automaticUpdatesEnabled = "automatic_updates_enabled"
+        case updateCheckInterval = "update_check_interval"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -87,6 +91,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         bgType = (bgt == "image") ? "image" : "color"
         let ratio = try c.decodeIfPresent(Double.self, forKey: .sidebarRatio) ?? Double(MainSplitLayout.defaultRatio)
         sidebarRatio = Double(MainSplitLayout.clampedRatio(CGFloat(ratio)))
+        automaticUpdatesEnabled = try c.decodeIfPresent(Bool.self, forKey: .automaticUpdatesEnabled) ?? false
+        updateCheckInterval = (try? c.decode(UpdateCheckInterval.self, forKey: .updateCheckInterval)) ?? .daily
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -99,6 +105,77 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try c.encode(bgImagePath, forKey: .bgImagePath)
         try c.encode(bgType, forKey: .bgType)
         try c.encode(sidebarRatio, forKey: .sidebarRatio)
+        try c.encode(automaticUpdatesEnabled, forKey: .automaticUpdatesEnabled)
+        try c.encode(updateCheckInterval, forKey: .updateCheckInterval)
+    }
+}
+
+public enum UpdateCheckInterval: String, CaseIterable, Codable, Identifiable, Sendable {
+    case sixHours = "six_hours"
+    case daily
+    case weekly
+
+    public var id: String { rawValue }
+    public var seconds: TimeInterval {
+        switch self {
+        case .sixHours: return 6 * 60 * 60
+        case .daily: return 24 * 60 * 60
+        case .weekly: return 7 * 24 * 60 * 60
+        }
+    }
+    public var title: String {
+        switch self {
+        case .sixHours: return "每 6 小时"
+        case .daily: return "每天"
+        case .weekly: return "每周"
+        }
+    }
+}
+
+public struct SemanticVersion: Comparable, Equatable, Sendable, CustomStringConvertible {
+    public let major: Int
+    public let minor: Int
+    public let patch: Int
+
+    public init(_ major: Int, _ minor: Int, _ patch: Int) {
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+
+    public init?(parsing value: String) {
+        let pattern = #"(?:^|[^0-9])(\d+)\.(\d+)\.(\d+)(?:[^0-9]|$)"#
+        guard let expression = try? NSRegularExpression(pattern: pattern),
+              let match = expression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              match.numberOfRanges == 4,
+              let majorRange = Range(match.range(at: 1), in: value),
+              let minorRange = Range(match.range(at: 2), in: value),
+              let patchRange = Range(match.range(at: 3), in: value),
+              let major = Int(value[majorRange]),
+              let minor = Int(value[minorRange]),
+              let patch = Int(value[patchRange]) else { return nil }
+        self.init(major, minor, patch)
+    }
+
+    public static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
+        (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
+    }
+
+    public var description: String { "\(major).\(minor).\(patch)" }
+}
+
+public enum UpdateVersionPolicy {
+    public static func newerVersion(
+        releaseTag: String,
+        releaseName: String?,
+        installedVersion: String,
+        currentReleaseTag: String?
+    ) -> SemanticVersion? {
+        guard releaseTag != currentReleaseTag,
+              let installed = SemanticVersion(parsing: installedVersion),
+              let released = SemanticVersion(parsing: releaseTag) ?? releaseName.flatMap(SemanticVersion.init(parsing:)),
+              released > installed else { return nil }
+        return released
     }
 }
 

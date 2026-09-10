@@ -6,6 +6,13 @@
 <key>CFBundleName</key><string>DayLine</string>
 <key>CFBundleDisplayName</key><string>DayLine</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>DayLine</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>DLUpdateRepositoryOwner</key><string>Higw2</string>
+<key>DLUpdateRepositoryName</key><string>DayLine-canlender-for-ubuntu24</string>
+<key>DLUpdateAssetName</key><string>DayLine-macOS.zip</string>
+<key>DLCurrentReleaseTag</key><string>Macos_version</string>
 </dict></plist>
