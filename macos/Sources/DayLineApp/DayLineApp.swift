@@ -74,6 +74,10 @@ final class DayLineModel: ObservableObject {
     func complete(_ event: CalendarEvent, completed: Bool = true) { do { try store.complete(event.id, completed: completed); reload() } catch { message = error.localizedDescription } }
     func delete(_ event: CalendarEvent) { do { try store.delete(event.id); reload() } catch { message = error.localizedDescription } }
     func persistSettings() { do { try settingsStore.save(settings) } catch { message = error.localizedDescription }; reload() }
+    func persistSidebarRatio(_ ratio: Double) {
+        settings.sidebarRatio = Double(MainSplitLayout.clampedRatio(CGFloat(ratio)))
+        do { try settingsStore.save(settings) } catch { message = error.localizedDescription }
+    }
     func setLaunchAtLogin(_ enabled: Bool) {
         do { if #available(macOS 13.0, *) { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }; settings.launchAtLogin = enabled; try settingsStore.save(settings) }
         catch { message = "登录启动设置失败：\(error.localizedDescription)" }
@@ -93,67 +97,10 @@ struct MainView: View {
     var body: some View {
         ZStack {
             DayLineBackgroundView(settings: model.settings, cornerRadius: 0)
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("DayLine").font(.system(size: 23, weight: .bold)).foregroundStyle(Color(hex: model.settings.themeColor))
-                    Button("返回今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }.buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
-                    DatePicker("", selection: $model.selectedDay, displayedComponents: .date).datePickerStyle(.graphical).labelsHidden().onChange(of: model.selectedDay) { _ in model.reload() }
-                    Text("下一项安排").font(.headline)
-                    if model.upcoming.isEmpty {
-                        Text("暂无近期待办").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(model.upcoming) { e in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(e.startsAt, format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(Color(hex: model.settings.themeColor))
-                                Text(e.title).lineLimit(1).font(.system(size: 13, weight: .medium))
-                            }
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(isLightBg ? Color.black.opacity(0.05) : Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                        }
-                    }
-                    Spacer()
-                    Button("收起到桌面") { showDesktop() }.buttonStyle(.bordered)
-                    Button("退出 DayLine") { quit() }.foregroundStyle(.red).buttonStyle(.plain)
-                }
-                .padding(18)
-                .frame(width: 262)
-                .background(.ultraThinMaterial.opacity(0.85))
-
-                Divider()
-
-                VStack(spacing: 0) {
-                    HStack {
-                        Button("‹") { model.go(-1) }.buttonStyle(.bordered)
-                        Button("›") { model.go(1) }.buttonStyle(.bordered)
-                        Button("今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }.buttonStyle(.bordered)
-                        Text(dayText).font(.title3.bold()).frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(model.events.filter { !$0.completed }.count) 项待办 · \(model.events.count) 个事件").foregroundStyle(.secondary)
-                        Button("偏好设置") { model.showSettings = true }.buttonStyle(.bordered)
-                        Button("＋ 新建事件") { model.presentNewEvent() }.buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial.opacity(0.75))
-
-                    Divider()
-
-                    ScrollView([.vertical]) {
-                        TimelineRepresentable(
-                            day: model.selectedDay,
-                            events: model.events,
-                            color: model.settings.themeColor,
-                            fontScale: model.settings.fontScale,
-                            bgColor: model.settings.bgColor,
-                            bgOpacity: model.settings.bgOpacity,
-                            bgImagePath: model.settings.bgImagePath,
-                            bgType: model.settings.bgType,
-                            open: { event in model.editing = event; model.showingEditor = true },
-                            newRange: { start, end in model.presentNewEvent((start, end)) },
-                            complete: { model.complete($0) }
-                        )
-                        .frame(minWidth: 540, minHeight: 1440)
-                    }
-                }
+            AdaptiveMainSplitView(sidebarRatio: model.settings.sidebarRatio, onRatioChange: { model.persistSidebarRatio($0) }) {
+                sidebar
+            } detail: {
+                detail
             }
         }
         .frame(minWidth: 840, minHeight: 600)
@@ -169,6 +116,116 @@ struct MainView: View {
         } message: {
             Text(model.message ?? "")
         }
+    }
+
+    private var sidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("DayLine").font(.system(size: 23, weight: .bold)).foregroundStyle(Color(hex: model.settings.themeColor))
+                Button("返回今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }
+                    .buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
+                ResponsiveMonthCalendarView(
+                    selectedDate: $model.selectedDay,
+                    accent: Color(hex: model.settings.themeColor),
+                    fontScale: model.settings.fontScale
+                )
+                    .onChange(of: model.selectedDay) { _ in model.reload() }
+                Text("下一项安排").font(.headline)
+                if model.upcoming.isEmpty {
+                    Text("暂无近期待办").foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.upcoming) { event in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.startsAt, format: .dateTime.month().day().hour().minute())
+                                .font(.caption).foregroundStyle(Color(hex: model.settings.themeColor))
+                            Text(event.title).lineLimit(1).font(.system(size: 13, weight: .medium))
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(isLightBg ? Color.black.opacity(0.05) : Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+                Divider().padding(.vertical, 2)
+                Button("收起到桌面") { showDesktop() }.buttonStyle(.bordered)
+                Button("退出 DayLine") { quit() }.foregroundStyle(.red).buttonStyle(.plain)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(.ultraThinMaterial.opacity(0.85))
+    }
+
+    private var detail: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(12)
+                .background(.ultraThinMaterial.opacity(0.75))
+            Divider()
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    TimelineRepresentable(
+                        day: model.selectedDay,
+                        events: model.events,
+                        color: model.settings.themeColor,
+                        fontScale: model.settings.fontScale,
+                        bgColor: model.settings.bgColor,
+                        bgOpacity: model.settings.bgOpacity,
+                        bgImagePath: model.settings.bgImagePath,
+                        bgType: model.settings.bgType,
+                        open: { event in model.editing = event; model.showingEditor = true },
+                        newRange: { start, end in model.presentNewEvent((start, end)) },
+                        complete: { model.complete($0) }
+                    )
+                    .frame(width: max(260, proxy.size.width), height: 1440, alignment: .topLeading)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                navigationButtons
+                Text(dayText).font(.title3.bold()).lineLimit(1)
+                Spacer(minLength: 10)
+                eventSummary
+                Button("偏好设置") { model.showSettings = true }.buttonStyle(.bordered)
+                newEventButton
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    navigationButtons
+                    Text(dayText).font(.headline).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                HStack {
+                    eventSummary
+                    Spacer(minLength: 8)
+                    Button("偏好设置") { model.showSettings = true }.buttonStyle(.bordered)
+                    newEventButton
+                }
+            }
+        }
+    }
+
+    private var navigationButtons: some View {
+        HStack(spacing: 6) {
+            Button("‹") { model.go(-1) }.buttonStyle(.bordered)
+            Button("›") { model.go(1) }.buttonStyle(.bordered)
+            Button("今天") { model.selectedDay = Calendar.current.startOfDay(for: Date()); model.reload() }.buttonStyle(.bordered)
+        }
+    }
+
+    private var eventSummary: some View {
+        Text("\(model.events.filter { !$0.completed }.count) 项待办 · \(model.events.count) 个事件")
+            .foregroundStyle(.secondary).lineLimit(1)
+    }
+
+    private var newEventButton: some View {
+        Button("＋ 新建事件") { model.presentNewEvent() }
+            .buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
     }
 }
 

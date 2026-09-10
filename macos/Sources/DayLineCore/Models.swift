@@ -55,6 +55,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var bgOpacity: Double = 0.90
     public var bgImagePath: String = ""
     public var bgType: String = "color"
+    public var sidebarRatio: Double = Double(MainSplitLayout.defaultRatio)
     public init() {}
     enum CodingKeys: String, CodingKey {
         case themeColor = "theme_color"
@@ -65,6 +66,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case bgOpacity = "bg_opacity"
         case bgImagePath = "bg_image_path"
         case bgType = "bg_type"
+        case sidebarRatio = "sidebar_ratio"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -83,6 +85,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         bgImagePath = try c.decodeIfPresent(String.self, forKey: .bgImagePath) ?? ""
         let bgt = try c.decodeIfPresent(String.self, forKey: .bgType) ?? "color"
         bgType = (bgt == "image") ? "image" : "color"
+        let ratio = try c.decodeIfPresent(Double.self, forKey: .sidebarRatio) ?? Double(MainSplitLayout.defaultRatio)
+        sidebarRatio = Double(MainSplitLayout.clampedRatio(CGFloat(ratio)))
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -94,6 +98,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try c.encode(bgOpacity, forKey: .bgOpacity)
         try c.encode(bgImagePath, forKey: .bgImagePath)
         try c.encode(bgType, forKey: .bgType)
+        try c.encode(sidebarRatio, forKey: .sidebarRatio)
     }
 }
 

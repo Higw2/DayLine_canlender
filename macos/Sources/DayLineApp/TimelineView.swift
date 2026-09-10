@@ -22,8 +22,20 @@ final class TimelineNSView: NSView {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { needsDisplay = true }
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        let changed = newSize != bounds.size
+        super.setBoundsSize(newSize)
+        if changed { needsDisplay = true }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect); let gutter:CGFloat=64; let width=max(bounds.width,540)
+        super.draw(dirtyRect); let gutter:CGFloat=64; let width=max(bounds.width,260)
 
         let isLight = Color(hex: bgColor).isLightColor && (bgType != "image")
         let separatorCol = isLight ? NSColor.separatorColor : NSColor.white.withAlphaComponent(0.22)

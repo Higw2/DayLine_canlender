@@ -1,5 +1,96 @@
 import Foundation
 
+/// Calendar arithmetic for the responsive month grid. The UI deliberately
+/// consumes scalar values here so this logic remains cheap and testable
+/// without SwiftUI or AppKit layout types.
+public enum MonthGridLayout {
+    public static let columns = 7
+    public static let rows = 6
+
+    public static func chineseCalendar(timeZone: TimeZone = .current) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "zh_CN")
+        calendar.timeZone = timeZone
+        calendar.firstWeekday = 2 // Monday
+        calendar.minimumDaysInFirstWeek = 1
+        return calendar
+    }
+
+    public static func monthStart(for date: Date, calendar: Calendar = MonthGridLayout.chineseCalendar()) -> Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+    }
+
+    /// Always returns six Monday-first weeks, including leading and trailing
+    /// dates from adjacent months so every month keeps a stable grid.
+    public static func dates(forMonth month: Date, calendar: Calendar = MonthGridLayout.chineseCalendar()) -> [Date] {
+        let start = monthStart(for: month, calendar: calendar)
+        let weekday = calendar.component(.weekday, from: start)
+        let leadingDays = (weekday - calendar.firstWeekday + columns) % columns
+        let firstCell = calendar.date(byAdding: .day, value: -leadingDays, to: start)!
+        return (0..<(columns * rows)).map { calendar.date(byAdding: .day, value: $0, to: firstCell)! }
+    }
+
+    public static func rowHeight(cellWidth: CGFloat, fontScale: CGFloat) -> CGFloat {
+        let safeWidth = cellWidth.isFinite ? max(0, cellWidth) : 0
+        let safeScale = fontScale.isFinite ? max(0, fontScale) : 1
+        return min(max(safeWidth * 0.78, 28 * safeScale), 48 * safeScale)
+    }
+}
+
+/// The persisted main-window sidebar proportion and the constraints used while
+/// the native split view is laid out.  Keeping this here makes the behaviour
+/// testable without creating an AppKit window.
+public enum MainSplitLayout {
+    public static let defaultRatio: CGFloat = 0.35
+    public static let ratioRange: ClosedRange<CGFloat> = 0.18...0.55
+    public static let dividerThickness: CGFloat = 1
+
+    public static func clampedRatio(_ ratio: CGFloat) -> CGFloat {
+        guard ratio.isFinite else { return defaultRatio }
+        return min(max(ratio, ratioRange.lowerBound), ratioRange.upperBound)
+    }
+
+    /// Match the Ubuntu layout: narrow or portrait windows stack the sidebar
+    /// above the timeline instead of squeezing both columns.
+    public static func shouldStack(width: CGFloat, height: CGFloat) -> Bool {
+        width < 960 || width < height
+    }
+
+    public static func minimums(stacked: Bool) -> (first: CGFloat, second: CGFloat) {
+        stacked ? (180, 260) : (220, 320)
+    }
+
+    /// Returns a divider position that honours the available pixel space. If
+    /// the window is temporarily too small, the position is constrained for
+    /// display only; callers continue to retain the original saved ratio.
+    public static func dividerPosition(
+        ratio: CGFloat,
+        containerLength: CGFloat,
+        minimumFirst: CGFloat,
+        minimumSecond: CGFloat,
+        dividerThickness: CGFloat = dividerThickness
+    ) -> CGFloat {
+        let available = max(0, containerLength - dividerThickness)
+        let lower = min(minimumFirst, available)
+        let upper = max(lower, available - minimumSecond)
+        return min(max(clampedRatio(ratio) * available, lower), upper)
+    }
+
+    public static func ratio(
+        forDividerPosition position: CGFloat,
+        containerLength: CGFloat,
+        dividerThickness: CGFloat = dividerThickness
+    ) -> CGFloat {
+        let available = max(0, containerLength - dividerThickness)
+        guard available > 0 else { return defaultRatio }
+        return clampedRatio(position / available)
+    }
+
+    public static func canFitMinimums(containerLength: CGFloat, minimumFirst: CGFloat, minimumSecond: CGFloat, dividerThickness: CGFloat = dividerThickness) -> Bool {
+        containerLength >= minimumFirst + minimumSecond + dividerThickness
+    }
+}
+
 public enum TimelineLayout {
     public static let dayMinutes = 1440
     public static let pixelsPerMinute: CGFloat = 1

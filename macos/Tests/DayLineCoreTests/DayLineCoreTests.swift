@@ -11,8 +11,65 @@ final class DayLineCoreTests: XCTestCase {
     func testShortEventsParticipateInOverlapColumns() { let d=date(7,0,0); let p=TimelineLayout.placements([event(1,date(7,15,0),date(7,15,5)),event(2,date(7,15,20),date(7,15,25))],on:d,calendar:calendar); XCTAssertEqual(p.map(\.columns),[2,2]); XCTAssertEqual(p.map(\.column),[0,1]) }
     func testConnectedOverlapAndEndpointReuse() { let d=date(7,0,0); let p=TimelineLayout.placements([event(1,date(7,9,0),date(7,10,0)),event(2,date(7,9,30),date(7,11,0)),event(3,date(7,10,30),date(7,12,0))],on:d,calendar:calendar); XCTAssertEqual(p.map(\.columns),[2,2,2]); XCTAssertEqual(p.map(\.column),[0,1,0]); let touching=TimelineLayout.placements([event(4,date(7,13,0),date(7,14,0)),event(5,date(7,14,0),date(7,15,0))],on:d,calendar:calendar); XCTAssertEqual(touching.map(\.columns),[1,1]) }
     func testStoreReminderRulesAndNotesOnlyEditPreservesSnooze() throws { let dir=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at:dir) }; let store=try EventStore(path:dir.appendingPathComponent("events.db")); let now=date(7,9,0); let e=try store.add(title:"未来",startsAt:date(7,10,0),endsAt:date(7,11,0),notes:"n",now:now); XCTAssertNil(e.alertedAt); try store.snooze(e.id,now:now); let snoozed=try store.get(e.id)!; _=try store.update(id:e.id,title:"未来改名",startsAt:e.startsAt,endsAt:e.endsAt,notes:"备注",now:now); XCTAssertEqual(try store.get(e.id)!.reminderAt,snoozed.reminderAt); let past=try store.add(title:"过去",startsAt:date(7,8,0),endsAt:date(7,8,30),now:now); XCTAssertNotNil(past.alertedAt); try store.complete(e.id,completed:true,now:now); try store.complete(e.id,completed:false,now:now); XCTAssertNil(try store.get(e.id)!.alertedAt) }
-    func testSettingsUsesDefaultsForPartialOrInvalidFile() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); try "{\"theme_color\":\"bad\",\"font_scale\":99}".data(using:.utf8)!.write(to:url); let settings=SettingsStore(path:url).current; XCTAssertEqual(settings.themeColor,"#28735f"); XCTAssertEqual(settings.fontScale,1); XCTAssertEqual(settings.desktopTheme,"dark"); XCTAssertEqual(settings.bgColor,"#1e242b"); XCTAssertEqual(settings.bgOpacity,0.90); XCTAssertEqual(settings.bgType,"color"); XCTAssertEqual(settings.bgImagePath,"") }
+    func testSettingsUsesDefaultsForPartialOrInvalidFile() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); try "{\"theme_color\":\"bad\",\"font_scale\":99}".data(using:.utf8)!.write(to:url); let settings=SettingsStore(path:url).current; XCTAssertEqual(settings.themeColor,"#28735f"); XCTAssertEqual(settings.fontScale,1); XCTAssertEqual(settings.desktopTheme,"dark"); XCTAssertEqual(settings.bgColor,"#1e242b"); XCTAssertEqual(settings.bgOpacity,0.90); XCTAssertEqual(settings.bgType,"color"); XCTAssertEqual(settings.bgImagePath,""); XCTAssertEqual(settings.sidebarRatio,Double(MainSplitLayout.defaultRatio)) }
     func testBackgroundSettingsCustomizationAndPersistence() throws { let url=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); let imagePath=url.appendingPathComponent("background.png").path; let store=SettingsStore(path:url); var s=store.current; s.bgColor="#2d3748"; s.bgOpacity=0.75; s.bgType="image"; s.bgImagePath=imagePath; try store.save(s); let loaded=SettingsStore(path:url).current; XCTAssertEqual(loaded.bgColor,"#2d3748"); XCTAssertEqual(loaded.bgOpacity,0.75); XCTAssertEqual(loaded.bgType,"image"); XCTAssertEqual(loaded.bgImagePath,imagePath) }
+    func testSidebarRatioSettingsClampAndRoundTrip() throws {
+        let low=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try "{\"sidebar_ratio\":0.01}".data(using:.utf8)!.write(to:low)
+        XCTAssertEqual(SettingsStore(path:low).current.sidebarRatio,0.18)
+        let high=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try "{\"sidebar_ratio\":0.99}".data(using:.utf8)!.write(to:high)
+        XCTAssertEqual(SettingsStore(path:high).current.sidebarRatio,0.55)
+        let saved=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let store=SettingsStore(path:saved); var settings=store.current; settings.sidebarRatio=0.42; try store.save(settings)
+        let data=try JSONSerialization.jsonObject(with:Data(contentsOf:saved)) as! [String:Any]
+        XCTAssertEqual(data["sidebar_ratio"] as? Double,0.42)
+        XCTAssertEqual(SettingsStore(path:saved).current.sidebarRatio,0.42)
+    }
+    func testMainSplitLayoutDirectionAndPixelLimits() {
+        XCTAssertFalse(MainSplitLayout.shouldStack(width:960,height:700))
+        XCTAssertTrue(MainSplitLayout.shouldStack(width:959,height:700))
+        XCTAssertTrue(MainSplitLayout.shouldStack(width:1000,height:1001))
+        XCTAssertEqual(MainSplitLayout.dividerPosition(ratio:0.35,containerLength:1000,minimumFirst:220,minimumSecond:320),349.65,accuracy:0.001)
+        XCTAssertEqual(MainSplitLayout.dividerPosition(ratio:0.18,containerLength:600,minimumFirst:220,minimumSecond:320),220,accuracy:0.001)
+        XCTAssertEqual(MainSplitLayout.dividerPosition(ratio:0.55,containerLength:600,minimumFirst:220,minimumSecond:320),279,accuracy:0.001)
+        XCTAssertFalse(MainSplitLayout.canFitMinimums(containerLength:500,minimumFirst:220,minimumSecond:320))
+    }
+    func testMainSplitLayoutRestoresSavedRatioAfterResize() {
+        let saved:CGFloat=0.48
+        let wide=MainSplitLayout.dividerPosition(ratio:saved,containerLength:1200,minimumFirst:220,minimumSecond:320)
+        let narrow=MainSplitLayout.dividerPosition(ratio:saved,containerLength:500,minimumFirst:220,minimumSecond:320)
+        XCTAssertEqual(wide,575.52,accuracy:0.001)
+        XCTAssertEqual(narrow,220,accuracy:0.001)
+        XCTAssertEqual(MainSplitLayout.ratio(forDividerPosition:wide,containerLength:1200),saved,accuracy:0.001)
+    }
+    func testMonthGridUsesMondayFirstAndAlwaysReturnsFortyTwoDates() {
+        var c = MonthGridLayout.chineseCalendar(timeZone: TimeZone(identifier: "America/Los_Angeles")!)
+        c.firstWeekday = 2
+        let september = c.date(from: DateComponents(year: 2026, month: 9, day: 17))!
+        let dates = MonthGridLayout.dates(forMonth: september, calendar: c)
+        XCTAssertEqual(dates.count, 42)
+        XCTAssertEqual(c.dateComponents([.year, .month, .day], from: dates.first!), DateComponents(year: 2026, month: 8, day: 31))
+        XCTAssertEqual(c.dateComponents([.year, .month, .day], from: dates.last!), DateComponents(year: 2026, month: 10, day: 11))
+        XCTAssertEqual(c.component(.weekday, from: dates.first!), c.firstWeekday)
+    }
+    func testMonthGridCoversLeapMonthAndHonorsCalendarFirstWeekday() {
+        var sundayFirst = MonthGridLayout.chineseCalendar(timeZone: TimeZone(identifier: "America/Los_Angeles")!)
+        sundayFirst.firstWeekday = 1
+        let february = sundayFirst.date(from: DateComponents(year: 2024, month: 2, day: 29))!
+        let dates = MonthGridLayout.dates(forMonth: february, calendar: sundayFirst)
+        XCTAssertEqual(dates.count, 42)
+        XCTAssertEqual(sundayFirst.dateComponents([.year, .month, .day], from: dates.first!), DateComponents(year: 2024, month: 1, day: 28))
+        XCTAssertTrue(dates.contains(february))
+        XCTAssertEqual(sundayFirst.component(.weekday, from: dates.first!), 1)
+    }
+    func testMonthGridRowHeightRespondsToWidthAndFontScale() {
+        XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 20, fontScale: 1), 28)
+        XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 48, fontScale: 1), 37.44, accuracy: 0.001)
+        XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 120, fontScale: 1), 48)
+        XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 20, fontScale: 1.3), 36.4, accuracy: 0.001)
+        XCTAssertEqual(MonthGridLayout.rowHeight(cellWidth: 80, fontScale: 1.3), 62.4, accuracy: 0.001)
+    }
     func testCRUDAndReopenPersistence() throws { let dir=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at:dir) }; let path=dir.appendingPathComponent("events.db"); let store=try EventStore(path:path); let created=try store.add(title:"原名称",startsAt:date(7,10,0),endsAt:date(7,11,0),notes:"旧备注",now:date(7,9,0)); let updated=try store.update(id:created.id,title:"新名称",startsAt:date(7,10,30),endsAt:date(7,11,30),notes:"新备注",now:date(7,9,0)); XCTAssertEqual(updated.title,"新名称"); XCTAssertEqual(updated.notes,"新备注"); XCTAssertEqual(try EventStore(path:path).get(created.id)?.title,"新名称"); try store.delete(created.id); XCTAssertNil(try store.get(created.id)) }
     func testDueSnoozeAlertAndExpiryBoundaries() throws { let dir=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at:dir) }; let path=dir.appendingPathComponent("events.db"); let store=try EventStore(path:path); let now=date(7,12,0); let createdAt=date(5,9,0); let due=try store.add(title:"到点",startsAt:now.addingTimeInterval(-60),endsAt:now.addingTimeInterval(3600),now:createdAt); let boundary=try store.add(title:"24小时边界",startsAt:now.addingTimeInterval(-86_400),endsAt:now.addingTimeInterval(-85_000),now:createdAt); let stale=try store.add(title:"过期",startsAt:now.addingTimeInterval(-86_401),endsAt:now.addingTimeInterval(-86_000),now:createdAt); XCTAssertEqual(try store.due(now:now).map(\.id),[boundary.id,due.id]); XCTAssertEqual(try store.expireStale(now:now),1); try store.markAlerted(due.id,now:now); let reopenedAfterAlert=try EventStore(path:path); XCTAssertFalse(try reopenedAfterAlert.due(now:now).map(\.id).contains(due.id)); try store.snooze(due.id,minutes:10,now:now); let reopenedAfterSnooze=try EventStore(path:path); XCTAssertEqual(try reopenedAfterSnooze.get(due.id)?.reminderAt,now.addingTimeInterval(600)); XCTAssertEqual(try reopenedAfterSnooze.due(now:now.addingTimeInterval(599)).count,0); XCTAssertTrue(try reopenedAfterSnooze.due(now:now.addingTimeInterval(600)).map(\.id).contains(due.id)); XCTAssertNotNil(try store.get(stale.id)?.alertedAt) }
 }
