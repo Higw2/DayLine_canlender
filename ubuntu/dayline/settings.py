@@ -22,6 +22,11 @@ def default_settings_file() -> Path:
 SIDEBAR_RATIO_DEFAULT = 0.35
 SIDEBAR_RATIO_MIN = 0.18
 SIDEBAR_RATIO_MAX = 0.55
+UPDATE_CHECK_INTERVALS = {
+    "six_hours": 6 * 60 * 60,
+    "daily": 24 * 60 * 60,
+    "weekly": 7 * 24 * 60 * 60,
+}
 
 
 def clamp_sidebar_ratio(value: float) -> float:
@@ -34,6 +39,20 @@ def split_position_for_width(ratio: float, width: int) -> int:
     """Return a split position that can be reapplied after a resize."""
 
     return round(width * clamp_sidebar_ratio(ratio))
+
+
+def clamp_split_position(position: int, axis_size: int, *, vertical: bool, handle_size: int = 10) -> int:
+    """Keep both panes usable while honoring the saved ratio range."""
+
+    minimum = min(
+        max(round(axis_size * SIDEBAR_RATIO_MIN), 160 if vertical else 168),
+        max(0, axis_size - handle_size),
+    )
+    maximum = min(
+        round(axis_size * SIDEBAR_RATIO_MAX),
+        axis_size - handle_size - (220 if vertical else 260),
+    )
+    return max(minimum, min(position, max(minimum, maximum)))
 
 
 @dataclass
@@ -49,6 +68,8 @@ class AppSettings:
     bg_image_path: str = ""
     bg_type: str = "color"  # "color" or "image"
     sidebar_ratio: float = SIDEBAR_RATIO_DEFAULT
+    automatic_updates_enabled: bool = True
+    update_check_interval: str = "daily"
 
     @classmethod
     def from_dict(cls, data: dict) -> AppSettings:
@@ -74,6 +95,9 @@ class AppSettings:
         if bg_type not in {"color", "image"}:
             bg_type = "color"
         sidebar_ratio = clamp_sidebar_ratio(data.get("sidebar_ratio", SIDEBAR_RATIO_DEFAULT))
+        update_check_interval = data.get("update_check_interval", "daily")
+        if not isinstance(update_check_interval, str) or update_check_interval not in UPDATE_CHECK_INTERVALS:
+            update_check_interval = "daily"
 
         return cls(
             theme_color=theme_color,
@@ -84,6 +108,8 @@ class AppSettings:
             bg_image_path=bg_image_path,
             bg_type=bg_type,
             sidebar_ratio=sidebar_ratio,
+            automatic_updates_enabled=data.get("automatic_updates_enabled", True) is True,
+            update_check_interval=update_check_interval,
         )
 
 
@@ -140,6 +166,8 @@ class SettingsManager:
         bg_image_path: str | None = None,
         bg_type: str | None = None,
         sidebar_ratio: float | None = None,
+        automatic_updates_enabled: bool | None = None,
+        update_check_interval: str | None = None,
     ) -> None:
         changed = False
         if theme_color is not None and theme_color != self._settings.theme_color:
@@ -168,6 +196,12 @@ class SettingsManager:
             if abs(sidebar_ratio - self._settings.sidebar_ratio) > 0.001:
                 self._settings.sidebar_ratio = sidebar_ratio
                 changed = True
+        if automatic_updates_enabled is not None and automatic_updates_enabled != self._settings.automatic_updates_enabled:
+            self._settings.automatic_updates_enabled = automatic_updates_enabled
+            changed = True
+        if update_check_interval is not None and update_check_interval != self._settings.update_check_interval:
+            self._settings.update_check_interval = update_check_interval
+            changed = True
 
         if changed:
             self.save()
@@ -188,6 +222,8 @@ class SettingsManager:
             bg_image_path=defaults.bg_image_path,
             bg_type=defaults.bg_type,
             sidebar_ratio=defaults.sidebar_ratio,
+            automatic_updates_enabled=defaults.automatic_updates_enabled,
+            update_check_interval=defaults.update_check_interval,
         )
 
 

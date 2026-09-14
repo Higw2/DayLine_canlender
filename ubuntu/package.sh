@@ -18,6 +18,8 @@ cp -r "$base_dir/packaging" "$target/"
 cp "$base_dir/install.py" "$target/"
 cp "$base_dir/run.sh" "$target/"
 cp "$base_dir/README.md" "$target/"
+cp "$base_dir/VERSION" "$target/"
+cp "$base_dir/update_helper.py" "$target/"
 
 # Clean up pycache
 find "$target" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true

@@ -1,4 +1,4 @@
-"""Persistent event storage.  This module deliberately has no GTK dependency."""
+"""Persistent event and note storage.  This module has no GTK dependency."""
 
 from __future__ import annotations
 
@@ -39,6 +39,16 @@ class Event:
         return self.reminder_at or self.starts_at
 
 
+@dataclass(frozen=True)
+class Note:
+    id: int
+    title: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+    auto_title: bool
+
+
 class EventStore:
     """Small SQLite repository used by both windows and the reminder service."""
 
@@ -70,6 +80,67 @@ class EventStore:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_due ON events(completed, alerted_at, reminder_at, starts_at)"
         )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                auto_title INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        note_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(notes)")}
+        if "auto_title" not in note_columns:
+            self.connection.execute("ALTER TABLE notes ADD COLUMN auto_title INTEGER NOT NULL DEFAULT 0")
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC, id DESC)"
+        )
+        self.connection.commit()
+
+    @staticmethod
+    def validate_note(body: str, title: str = "") -> tuple[str, str, bool]:
+        title = title.strip()
+        auto_title = not title
+        if auto_title:
+            title = next((line.strip() for line in body.splitlines() if line.strip()), "无标题便笺")[:120]
+        if len(title) > 120:
+            raise ValueError("便笺标题不能超过 120 个字符")
+        return title, body, auto_title
+
+    def add_note(self, body: str, title: str = "", *, now: datetime | None = None) -> Note:
+        title, body, auto_title = self.validate_note(body, title)
+        timestamp = (now or datetime.now()).isoformat(sep=" ")
+        cursor = self.connection.execute(
+            "INSERT INTO notes(title, body, created_at, updated_at, auto_title) VALUES (?, ?, ?, ?, ?)",
+            (title, body, timestamp, timestamp, int(auto_title)),
+        )
+        self.connection.commit()
+        return self.get_note(int(cursor.lastrowid))
+
+    def list_notes(self) -> list[Note]:
+        rows = self.connection.execute(
+            "SELECT * FROM notes ORDER BY updated_at DESC, id DESC"
+        ).fetchall()
+        return [self._note(row) for row in rows]
+
+    def get_note(self, note_id: int) -> Note | None:
+        row = self.connection.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
+        return self._note(row) if row else None
+
+    def update_note(self, note_id: int, body: str, title: str = "", *, now: datetime | None = None) -> Note:
+        title, body, auto_title = self.validate_note(body, title)
+        if self.get_note(note_id) is None:
+            raise KeyError(note_id)
+        self.connection.execute(
+            "UPDATE notes SET title=?, body=?, auto_title=?, updated_at=? WHERE id=?",
+            (title, body, int(auto_title), (now or datetime.now()).isoformat(sep=" "), note_id),
+        )
+        self.connection.commit()
+        return self.get_note(note_id)
+
+    def delete_note(self, note_id: int) -> None:
+        self.connection.execute("DELETE FROM notes WHERE id=?", (note_id,))
         self.connection.commit()
 
     @staticmethod
@@ -191,4 +262,12 @@ class EventStore:
             ends_at=from_iso(row["ends_at"]), notes=row["notes"], completed=bool(row["completed"]),
             alerted_at=from_iso(row["alerted_at"]) if row["alerted_at"] else None,
             reminder_at=from_iso(row["reminder_at"]) if row["reminder_at"] else None,
+        )
+
+    @staticmethod
+    def _note(row: sqlite3.Row) -> Note:
+        return Note(
+            id=row["id"], title=row["title"], body=row["body"],
+            created_at=from_iso(row["created_at"]), updated_at=from_iso(row["updated_at"]),
+            auto_title=bool(row["auto_title"]),
         )

@@ -241,10 +241,11 @@ class X11DesktopHints:
 
 
 class DesktopWidget(Gtk.Window):
-    def __init__(self, app, store: EventStore, open_editor, create_event, quit_app, open_settings=None):
+    def __init__(self, app, store: EventStore, open_editor, create_event, quit_app, create_note, open_settings=None):
         super().__init__(application=app, title="DayLine · 桌面日程")
         self.store, self.open_editor, self.create_event, self.quit_app = store, open_editor, create_event, quit_app
         self.open_settings = open_settings
+        self.create_note = create_note
         self.hints_applied = False
         self._x11_hints: X11DesktopHints | None = None
         self._x11_xid = 0
@@ -429,14 +430,18 @@ class DesktopWidget(Gtk.Window):
 
         self._root.append(scroll)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=6, margin_bottom=10, margin_start=14, margin_end=12)
-        new = Gtk.Button(label="＋ 新建")
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_top=6, margin_bottom=10, margin_start=14, margin_end=12)
+        new = Gtk.Button(label="＋ 事件", tooltip_text="新建日程事件")
         new.add_css_class("desktop-new")
         new.connect("clicked", lambda *_: self.create_event())
 
-        open_button = Gtk.Button(label="打开日程")
+        open_button = Gtk.Button(label="打开", tooltip_text="打开日程")
         open_button.add_css_class("desktop-action-btn")
         open_button.connect("clicked", lambda *_: self.open_editor())
+
+        note_button = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text="新建便笺")
+        note_button.add_css_class("desktop-action-btn")
+        note_button.connect("clicked", lambda *_: self.create_note())
 
         spacer = Gtk.Box(hexpand=True)
 
@@ -467,6 +472,7 @@ class DesktopWidget(Gtk.Window):
         actions.append(new)
         actions.append(open_button)
         actions.append(spacer)
+        actions.append(note_button)
         actions.append(settings_button)
         actions.append(quit_button)
         actions.append(resize_grip)

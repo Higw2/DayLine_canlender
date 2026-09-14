@@ -202,6 +202,7 @@ class TimelineCanvas(Gtk.Overlay):
         self.placements: list[EventPlacement] = []
         self._clock_source_id = 0
         self._drag_start_y: float | None = None
+        self._layout_width = TIMELINE_MIN_WIDTH
         self.set_size_request(TIMELINE_MIN_WIDTH, DAY_HEIGHT)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -262,7 +263,6 @@ class TimelineCanvas(Gtk.Overlay):
         drag.connect("drag-update", self._drag_update)
         drag.connect("drag-end", self._drag_end)
         self.add_controller(drag)
-        self.connect("notify::width", self._width_changed)
         self.connect("map", self._on_map)
         self.connect("unmap", self._on_unmap)
 
@@ -310,7 +310,7 @@ class TimelineCanvas(Gtk.Overlay):
         return False
 
     def _show_selection(self, start: int, end: int) -> None:
-        width = max(1, (self.get_width() or TIMELINE_MIN_WIDTH) - TIME_GUTTER_WIDTH - 8)
+        width = max(1, self._layout_width - TIME_GUTTER_WIDTH - 8)
         y = start * PX_PER_MINUTE
         self.selection_box.set_size_request(width, (end - start) * PX_PER_MINUTE)
         self.selection_layer.move(self.selection_box, TIME_GUTTER_WIDTH + 4, y)
@@ -343,13 +343,16 @@ class TimelineCanvas(Gtk.Overlay):
             self.cards.remove(child)
             child = following
 
-    def _width_changed(self, *_args) -> None:
+    def set_layout_width(self, width: int) -> None:
+        width = max(TIMELINE_MIN_WIDTH, width)
+        if width == self._layout_width:
+            return
+        self._layout_width = width
         self._layout_grid()
         self._layout_cards()
 
     def _layout_grid(self) -> None:
-        width = self.get_width() or TIMELINE_MIN_WIDTH
-        line_width = max(1, width - TIME_GUTTER_WIDTH)
+        line_width = max(1, self._layout_width - TIME_GUTTER_WIDTH)
         for minute, line in zip(range(0, DAY_MINUTES + 1, 30), self._horizontal_lines):
             line.set_size_request(line_width, 1)
             self.grid.move(line, TIME_GUTTER_WIDTH, minute * PX_PER_MINUTE)
@@ -371,8 +374,7 @@ class TimelineCanvas(Gtk.Overlay):
             self.grid.move(self._now_dot, TIME_GUTTER_WIDTH - 6, max(0, minute - 8))
 
     def _layout_cards(self) -> None:
-        width = self.get_width() or TIMELINE_MIN_WIDTH
-        content_width = width - TIME_GUTTER_WIDTH
+        content_width = self._layout_width - TIME_GUTTER_WIDTH
         child = self.cards.get_first_child()
         for placement in self.placements:
             if child is None:
