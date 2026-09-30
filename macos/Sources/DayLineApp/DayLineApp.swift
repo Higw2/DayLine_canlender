@@ -95,6 +95,7 @@ struct MainView: View {
     @ObservedObject var updater: UpdateController
     let showDesktop: () -> Void; let quit: () -> Void
     @State private var displayedMonth: Date
+    @State private var eventPendingDeletion: CalendarEvent?
 
     init(model: DayLineModel, updater: UpdateController, showDesktop: @escaping () -> Void, quit: @escaping () -> Void) {
         _model = ObservedObject(wrappedValue: model)
@@ -137,6 +138,18 @@ struct MainView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(model.message ?? "")
+        }
+        .confirmationDialog("删除事件？", isPresented: Binding(
+            get: { eventPendingDeletion != nil },
+            set: { if !$0 { eventPendingDeletion = nil } }
+        ), titleVisibility: .visible) {
+            Button("删除事件", role: .destructive) {
+                if let event = eventPendingDeletion { model.delete(event) }
+                eventPendingDeletion = nil
+            }
+            Button("取消", role: .cancel) { eventPendingDeletion = nil }
+        } message: {
+            Text(eventPendingDeletion.map { "确定删除“\($0.title)”吗？" } ?? "")
         }
     }
 
@@ -185,7 +198,9 @@ struct MainView: View {
                 .background(.ultraThinMaterial.opacity(0.75))
             Divider()
             GeometryReader { proxy in
-                ScrollView(.vertical) {
+                let columns = TimelineLayout.placements(model.events, on: model.selectedDay).map(\.columns).max() ?? 1
+                let contentWidth = max(260, proxy.size.width, 74 + CGFloat(columns) * 72)
+                ScrollView(contentWidth > proxy.size.width + 1 ? [.vertical, .horizontal] : .vertical) {
                     TimelineRepresentable(
                         day: model.selectedDay,
                         events: model.events,
@@ -196,10 +211,11 @@ struct MainView: View {
                         bgImagePath: model.settings.bgImagePath,
                         bgType: model.settings.bgType,
                         open: { event in model.editing = event; model.showingEditor = true },
+                        delete: { event in eventPendingDeletion = event },
                         newRange: { start, end in model.presentNewEvent((start, end)) },
                         complete: { model.complete($0) }
                     )
-                    .frame(width: max(260, proxy.size.width), height: 1440, alignment: .topLeading)
+                    .frame(width: contentWidth, height: 1440, alignment: .topLeading)
                 }
             }
         }
