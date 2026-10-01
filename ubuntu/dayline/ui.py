@@ -8,16 +8,18 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
 from .desktop import DesktopWidget
 from .background import BackgroundSurface
+from .notes import NotesPage
 from .reminders import ReminderService
-from .settings import AppSettings, clamp_sidebar_ratio, get_settings_manager, split_position_for_width
+from .settings import AppSettings, clamp_sidebar_ratio, clamp_split_position, get_settings_manager, split_position_for_width
 from .settings_dialog import open_settings_dialog
 from .storage import Event, EventStore
 from .theme import apply_theme, generate_css
 from .timeline import TimelineCanvas, should_stack_split
+from .updater import UpdateController
 
 
 CSS = generate_css(AppSettings()).encode("utf-8")
@@ -94,7 +96,6 @@ class EventDialog(Gtk.Dialog):
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app, store: EventStore, desktop: DesktopWidget):
-        super().__init__(application=app, title="时序 · Dayline")
         super().__init__(application=app, title="DayLine")
         self.store, self.desktop, self.selected_day = store, desktop, date.today()
         self.set_default_size(1060, 720)
@@ -107,7 +108,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._separator_dragging = False
         self.connect("close-request", self._hide)
         self._build()
-        self.refresh()
+        self.goto_day(self.selected_day)
 
     def _build(self):
         root = Gtk.Overlay()
@@ -133,14 +134,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         outer.add_css_class("main-split")
-        outer.set_wide_handle(True)
+        outer.set_wide_handle(False)
         outer.set_resize_start_child(True)
         outer.set_shrink_start_child(True)
         outer.set_resize_end_child(True)
         outer.set_shrink_end_child(True)
         outer.connect("notify::position", self._split_position_changed)
         self.split_pane = outer
-        self._last_split_size = (-1, -1)
+        self._last_split_size = (-1, -1, -1, -1)
         outer.set_vexpand(True)
         shell.append(outer)
 
@@ -159,23 +160,37 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_scroll.set_vexpand(True)
         sidebar_scroll.set_child(sidebar)
         outer.set_start_child(sidebar_scroll)
+        self.sidebar = sidebar
+        self.sidebar_scroll = sidebar_scroll
         split_handle = sidebar_scroll.get_next_sibling()
         split_handle.set_can_target(True)
         self.split_handle = split_handle
 
         brand_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
         brand_icon = Gtk.Image(icon_name="x-office-calendar-symbolic")
-        brand = Gtk.Label(label="时序 · Dayline", xalign=0)
         brand = Gtk.Label(label="DayLine", xalign=0)
         brand.add_css_class("brand")
         brand_box.append(brand_icon)
         brand_box.append(brand)
-        sidebar.append(brand_box)
-
+        modes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        modes.add_css_class("sidebar-modes")
+        self.schedule_mode_button = Gtk.Button(label="日程", hexpand=True)
+        self.schedule_mode_button.connect("clicked", lambda *_: self.show_schedule())
+        self.notes_mode_button = Gtk.Button(label="随手记", hexpand=True)
+        self.notes_mode_button.connect("clicked", lambda *_: self.show_notes())
+        modes.append(self.schedule_mode_button)
+        modes.append(self.notes_mode_button)
         today = Gtk.Button(label="返回今天")
+        self.today_button = today
         today.add_css_class("sidebar-today-btn")
-        today.connect("clicked", lambda *_: self.goto_day(date.today()))
-        sidebar.append(today)
+        today.connect("clicked", lambda *_: self.goto_day(date.today(), scroll_to_now=True))
+
+        sidebar_toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        sidebar_toolbar.append(brand_box)
+        sidebar_toolbar.append(modes)
+        sidebar_toolbar.append(today)
+        sidebar.append(sidebar_toolbar)
+        self.sidebar_toolbar = sidebar_toolbar
 
         self.calendar = Gtk.Calendar()
         self.calendar.connect("day-selected", self._calendar_selected)
@@ -195,7 +210,6 @@ class MainWindow(Adw.ApplicationWindow):
         desktop_note.add_css_class("muted")
         sidebar.append(desktop_note)
 
-        quit_button = Gtk.Button(label="退出时序")
         quit_button = Gtk.Button(label="退出 DayLine")
         quit_button.add_css_class("flat")
         quit_button.connect("clicked", lambda *_: self.get_application().quit())
@@ -206,7 +220,15 @@ class MainWindow(Adw.ApplicationWindow):
         outer.set_end_child(body)
         self.body = body
 
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_top=18, margin_start=20, margin_end=24, margin_bottom=6)
+        self.content_stack = Gtk.Stack(vexpand=True, hexpand=True)
+        self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.content_stack.set_hhomogeneous(False)
+        self.content_stack.set_vhomogeneous(False)
+        body.append(self.content_stack)
+        schedule_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
+        self.content_stack.add_named(schedule_page, "schedule")
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_top=18, margin_start=12, margin_end=16, margin_bottom=6)
         nav_group = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         nav_group.add_css_class("linked")
         previous = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="前一天")
@@ -221,6 +243,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.append(nav_group)
 
         self.date_label = Gtk.Label(xalign=0, hexpand=True)
+        self.date_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.date_label.add_css_class("date-title")
         self.stats_label = Gtk.Label(xalign=1)
         self.stats_label.add_css_class("stat")
@@ -231,60 +254,119 @@ class MainWindow(Adw.ApplicationWindow):
         header.append(self.date_label)
         header.append(self.stats_label)
         header.append(add)
-        body.append(header)
+        schedule_page.append(header)
         self.header = header
         self.add_event_button = add
-        body.connect("notify::width", self._adapt_header)
 
         self.timeline = TimelineCanvas(self._event_card, self._create_event_from_range)
         self.timeline.add_css_class("timeline")
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.scroll.set_child(self.timeline)
-        body.append(self.scroll)
+        schedule_page.append(self.scroll)
+        self.notes_page = NotesPage(self.store)
+        self.content_stack.add_named(self.notes_page, "notes")
+        self.show_schedule()
         self.split_pane.add_tick_callback(self._split_tick)
 
     def _hide(self, *_):
+        self.notes_page.flush()
         self.set_visible(False)
         self.desktop.present()
         return True
 
+    def show_schedule(self) -> None:
+        if self.content_stack.get_visible_child_name() == "notes":
+            self.notes_page.flush()
+        self.content_stack.set_visible_child_name("schedule")
+        self.schedule_mode_button.add_css_class("active")
+        self.notes_mode_button.remove_css_class("active")
+
+    def show_notes(self) -> None:
+        self.content_stack.set_visible_child_name("notes")
+        self.schedule_mode_button.remove_css_class("active")
+        self.notes_mode_button.add_css_class("active")
+
+    def new_note(self) -> None:
+        self.show_notes()
+        self.notes_page.new_note()
+
     def _split_tick(self, _widget, _frame_clock) -> bool:
-        size = (self.split_pane.get_width(), self.split_pane.get_height())
-        if size != self._last_split_size and size[0] > 0 and size[1] > 0:
-            self._last_split_size = size
+        size = (self.split_pane.get_width(), self.split_pane.get_height(), self.get_width(), self.get_height())
+        if size != self._last_split_size and all(part > 0 for part in size):
             if self._separator_dragging:
                 return True
+            self._last_split_size = size
             self._layout_main_split()
         return True
 
     def _layout_main_split(self, *_args):
         if self._separator_dragging:
             return False
-        width, height = self.split_pane.get_width(), self.split_pane.get_height()
+        width, height = self.get_width(), self.get_height()
         if width <= 0 or height <= 0:
             return False
         orientation = Gtk.Orientation.VERTICAL if should_stack_split(width, height) else Gtk.Orientation.HORIZONTAL
         if orientation != self._split_orientation:
             self._setting_split_position = True
             self.split_pane.set_orientation(orientation)
+            if orientation == Gtk.Orientation.VERTICAL:
+                self.split_pane.add_css_class("stacked")
+                self.sidebar_toolbar.set_orientation(Gtk.Orientation.HORIZONTAL)
+                self.sidebar_toolbar.set_spacing(8)
+            else:
+                self.split_pane.remove_css_class("stacked")
+                self.sidebar_toolbar.set_orientation(Gtk.Orientation.VERTICAL)
+                self.sidebar_toolbar.set_spacing(14)
             self._split_orientation = orientation
             self._setting_split_position = False
-            self._last_split_size = (-1, -1)
+            self._last_split_size = (-1, -1, -1, -1)
             self._adapt_header()
+            self._layout_timeline_width()
             return False
-        axis_size = height if orientation == Gtk.Orientation.VERTICAL else width
+        axis_size = self.split_pane.get_height() if orientation == Gtk.Orientation.VERTICAL else self.split_pane.get_width()
         self._setting_split_position = True
-        self.split_pane.set_position(split_position_for_width(self._sidebar_ratio, axis_size))
+        self.split_pane.set_position(self._bounded_split_position(split_position_for_width(self._sidebar_ratio, axis_size)))
         self._setting_split_position = False
+        self._adapt_header()
+        self._layout_timeline_width()
         return False
+
+    def _bounded_split_position(self, position: int) -> int:
+        vertical = self._split_orientation == Gtk.Orientation.VERTICAL
+        axis_size = self.split_pane.get_height() if vertical else self.split_pane.get_width()
+        handle_size = self.split_handle.get_height() if vertical else self.split_handle.get_width()
+        bounded = clamp_split_position(position, axis_size, vertical=vertical, handle_size=handle_size)
+        if vertical:
+            toolbar_height = self.sidebar_toolbar.measure(Gtk.Orientation.VERTICAL, -1)[0]
+            calendar_height = self.calendar.measure(Gtk.Orientation.VERTICAL, -1)[0]
+            calendar_bottom = self.sidebar.get_margin_top() + 14 + toolbar_height + self.sidebar.get_spacing() + calendar_height + 8
+            maximum = max(0, axis_size - handle_size - 220)
+            return max(bounded, min(calendar_bottom, maximum))
+        calendar_width = self.sidebar_scroll.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+        maximum = max(0, axis_size - handle_size - 260)
+        return max(bounded, min(calendar_width, maximum))
 
     def _split_position_changed(self, *_args) -> None:
         axis_size = self.split_pane.get_height() if self._split_orientation == Gtk.Orientation.VERTICAL else self.split_pane.get_width()
         if axis_size <= 0 or self._setting_split_position:
             return
-        if not getattr(self, "_separator_dragging", False):
-            return
-        self._sidebar_ratio = clamp_sidebar_ratio(self.split_pane.get_position() / axis_size)
+        bounded = self._bounded_split_position(self.split_pane.get_position())
+        if bounded != self.split_pane.get_position():
+            self._setting_split_position = True
+            self.split_pane.set_position(bounded)
+            self._setting_split_position = False
+        if self._separator_dragging:
+            self._sidebar_ratio = clamp_sidebar_ratio(bounded / axis_size)
+        self._adapt_header()
+        self._layout_timeline_width()
+
+    def _layout_timeline_width(self) -> None:
+        window_width = min(self.split_pane.get_width(), self.get_width())
+        if self._split_orientation == Gtk.Orientation.VERTICAL:
+            pane_width = window_width
+        else:
+            pane_width = window_width - self.split_pane.get_position() - self.split_handle.get_width() - 2
+        self.timeline.set_layout_width(pane_width - 30)  # Timeline CSS margins and border use 30px total.
 
     def _split_pointer_axis(self, x: float, y: float) -> float:
         return y if self._split_orientation == Gtk.Orientation.VERTICAL else x
@@ -295,15 +377,32 @@ class MainWindow(Adw.ApplicationWindow):
         if event_type == Gdk.EventType.BUTTON_PRESS:
             if event.get_button() != 1:
                 return False
-            _, split_origin = self.split_pane.compute_point(self.shell, Graphene.Point())
+            _, split_origin = self.split_handle.compute_point(self.shell, Graphene.Point())
             _, pointer_x, pointer_y = event.get_position()
             pointer = self._split_pointer_axis(pointer_x, pointer_y)
-            separator = (split_origin.y if self._split_orientation == Gtk.Orientation.VERTICAL else split_origin.x) + self.split_pane.get_position()
-            self._separator_dragging = abs(pointer - separator) <= 18
+            self._separator_dragging = (
+                split_origin.x <= pointer_x < split_origin.x + self.split_handle.get_width()
+                and split_origin.y <= pointer_y < split_origin.y + self.split_handle.get_height()
+            )
             if self._separator_dragging:
                 self._start_pointer = pointer
                 self._start_position = self.split_pane.get_position()
                 self._last_pointer = pointer
+                return True
+            # The Paned's own gesture has a wider hit area than its visible bar.
+            # Consume that edge strip so calendar content cannot start a resize.
+            edge_padding = 8
+            if self._split_orientation == Gtk.Orientation.VERTICAL:
+                near_handle = (
+                    split_origin.x <= pointer_x < split_origin.x + self.split_handle.get_width()
+                    and split_origin.y - edge_padding <= pointer_y < split_origin.y + self.split_handle.get_height() + edge_padding
+                )
+            else:
+                near_handle = (
+                    split_origin.y <= pointer_y < split_origin.y + self.split_handle.get_height()
+                    and split_origin.x - edge_padding <= pointer_x < split_origin.x + self.split_handle.get_width() + edge_padding
+                )
+            if near_handle:
                 return True
             return False
         if event_type == Gdk.EventType.MOTION_NOTIFY:
@@ -325,7 +424,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _set_split_position(self, pointer: float) -> None:
-        self.split_pane.set_position(round(self._start_position + pointer - self._start_pointer))
+        self.split_pane.set_position(self._bounded_split_position(round(self._start_position + pointer - self._start_pointer)))
         axis_size = self.split_pane.get_height() if self._split_orientation == Gtk.Orientation.VERTICAL else self.split_pane.get_width()
         self._sidebar_ratio = clamp_sidebar_ratio(self.split_pane.get_position() / axis_size)
 
@@ -343,13 +442,25 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _adapt_header(self, *_args) -> None:
-        narrow = self._split_orientation == Gtk.Orientation.VERTICAL or self.body.get_width() < 620
+        children = (self.header.get_first_child(), self.date_label, self.stats_label, self.add_event_button)
+        wide_width = (
+            self.header.get_margin_start()
+            + self.header.get_margin_end()
+            + sum(child.measure(Gtk.Orientation.HORIZONTAL, -1)[1] for child in children)
+            + 10 * (len(children) - 1)
+        )
+        if self._split_orientation == Gtk.Orientation.VERTICAL:
+            available_width = min(self.split_pane.get_width(), self.get_width())
+        else:
+            available_width = min(self.split_pane.get_width(), self.get_width()) - self.split_pane.get_position() - self.split_handle.get_width() - 2
+        narrow = self._split_orientation == Gtk.Orientation.VERTICAL or available_width < wide_width
         self.header.set_orientation(Gtk.Orientation.VERTICAL if narrow else Gtk.Orientation.HORIZONTAL)
         self.header.set_size_request(0, -1)
         self.stats_label.set_visible(True)
         self.add_event_button.set_label("＋ 新建事件")
         self.header.set_spacing(6 if narrow else 10)
-        for child in (self.date_label, self.stats_label, self.add_event_button):
+        self.date_label.set_halign(Gtk.Align.FILL)
+        for child in (self.stats_label, self.add_event_button):
             child.set_halign(Gtk.Align.START if narrow else Gtk.Align.FILL)
 
     def _calendar_selected(self, calendar):
@@ -362,6 +473,7 @@ class MainWindow(Adw.ApplicationWindow):
             pass
 
     def goto_day(self, day: date, scroll_to_now: bool = False):
+        self.show_schedule()
         self.selected_day = day
         self._syncing_calendar = True
         try:
@@ -370,7 +482,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._syncing_calendar = False
         self.refresh()
         if scroll_to_now:
-            GLib.idle_add(self._scroll_to_now)
+            self.scroll.add_tick_callback(self._scroll_to_now_after_layout)
+
+    def _scroll_to_now_after_layout(self, _widget, _frame_clock):
+        self._scroll_to_now()
+        return False
 
     def _scroll_to_now(self):
         adjustment = self.scroll.get_vadjustment()
@@ -494,6 +610,8 @@ class DaylineApplication(Adw.Application):
         self.main_window: MainWindow | None = None
         self.reminders: ReminderService | None = None
         self.settings_manager = None
+        self.updater: UpdateController | None = None
+        self._last_notified_update = None
         self.hold()
         self.connect("shutdown", self._shutdown)
 
@@ -510,10 +628,14 @@ class DaylineApplication(Adw.Application):
             self.show_editor,
             self.new_event,
             self.quit,
+            self.new_note,
             open_settings=self.open_settings,
         )
         self.main_window = MainWindow(self, self.store, self.desktop)
         self.reminders = ReminderService(self, self.store, self.refresh_all)
+        self.updater = UpdateController()
+        self.updater.on_quit = self.quit
+        self.updater.add_listener(self._on_update_status)
         GLib.idle_add(self._initial_reminder_check)
 
     def _initial_reminder_check(self):
@@ -536,10 +658,7 @@ class DaylineApplication(Adw.Application):
 
     def show_editor(self):
         self.main_window.present()
-        self.main_window.refresh()
-        if not getattr(self, "_initial_editor_positioned", False):
-            self._initial_editor_positioned = True
-            GLib.idle_add(self.main_window._scroll_to_now)
+        self.main_window.goto_day(date.today(), scroll_to_now=True)
 
     def show_desktop(self):
         self.desktop.present()
@@ -549,12 +668,25 @@ class DaylineApplication(Adw.Application):
         self.show_editor()
         self.main_window.open_event_dialog()
 
+    def new_note(self):
+        self.main_window.present()
+        self.main_window.new_note()
+
     def open_settings(self):
         parent = self.main_window if self.main_window and self.main_window.get_visible() else None
-        open_settings_dialog(parent=parent)
+        open_settings_dialog(parent=parent, updater=self.updater)
+
+    def _on_update_status(self, updater):
+        if updater.available and updater.available.tag != self._last_notified_update:
+            self._last_notified_update = updater.available.tag
+            notification = Gio.Notification.new(f"DayLine {updater.available.version} 已发布")
+            notification.set_body("打开设置即可在应用内下载并安装 Ubuntu 更新。")
+            self.send_notification("dayline-update", notification)
 
     def _on_settings_changed(self, _settings):
         self.refresh_all()
+        if self.updater:
+            self.updater.settings_changed()
 
     def refresh_all(self):
         if self.main_window:
@@ -563,6 +695,8 @@ class DaylineApplication(Adw.Application):
             self.desktop.refresh()
 
     def _shutdown(self, *_):
+        if self.main_window:
+            self.main_window.notes_page.flush()
         if self.reminders:
             self.reminders.stop()
         if self.store:

@@ -10,6 +10,7 @@ from dayline.settings import (
     AppSettings,
     SettingsManager,
     clamp_sidebar_ratio,
+    clamp_split_position,
     split_position_for_width,
 )
 from dayline.theme import (
@@ -41,6 +42,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.bg_image_path, "")
         self.assertEqual(settings.bg_type, "color")
         self.assertEqual(settings.sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
+        self.assertTrue(settings.automatic_updates_enabled)
+        self.assertEqual(settings.update_check_interval, "daily")
 
     def test_sidebar_ratio_is_clamped_and_legacy_settings_use_default(self):
         self.assertEqual(AppSettings.from_dict({}).sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
@@ -50,11 +53,18 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(split_position_for_width(0.36, 1000), 360)
         self.assertEqual(split_position_for_width(0.01, 1000), round(1000 * SIDEBAR_RATIO_MIN))
 
+    def test_split_position_keeps_both_panes_visible(self):
+        self.assertEqual(clamp_split_position(-100, 520, vertical=False), 168)
+        self.assertEqual(clamp_split_position(1000, 520, vertical=False), 250)
+        self.assertEqual(clamp_split_position(-100, 449, vertical=True), 160)
+        self.assertEqual(clamp_split_position(1000, 449, vertical=True), 219)
+        self.assertEqual(clamp_split_position(1000, 100, vertical=False), 90)
+
     def test_load_and_save_settings(self):
         manager = SettingsManager(self.config_path)
         self.assertEqual(manager.current.theme_color, "#28735f")
 
-        manager.update(theme_color="#2563eb", font_scale=1.15, desktop_theme="tinted", bg_color="#2d3748", bg_opacity=0.75, bg_image_path="/tmp/background.png", bg_type="image", sidebar_ratio=0.36)
+        manager.update(theme_color="#2563eb", font_scale=1.15, desktop_theme="tinted", bg_color="#2d3748", bg_opacity=0.75, bg_image_path="/tmp/background.png", bg_type="image", sidebar_ratio=0.36, automatic_updates_enabled=False, update_check_interval="weekly")
         self.assertTrue(self.config_path.is_file())
 
         # Load fresh in another manager instance
@@ -67,6 +77,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(manager2.current.bg_image_path, "/tmp/background.png")
         self.assertEqual(manager2.current.bg_type, "image")
         self.assertEqual(manager2.current.sidebar_ratio, 0.36)
+        self.assertFalse(manager2.current.automatic_updates_enabled)
+        self.assertEqual(manager2.current.update_check_interval, "weekly")
 
     def test_listener_notification(self):
         manager = SettingsManager(self.config_path)
@@ -104,6 +116,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(manager.current.desktop_theme, "dark")
         self.assertEqual(manager.current.bg_type, "color")
         self.assertEqual(manager.current.sidebar_ratio, SIDEBAR_RATIO_DEFAULT)
+        self.assertTrue(manager.current.automatic_updates_enabled)
+        self.assertEqual(manager.current.update_check_interval, "daily")
 
     def test_background_settings_are_clamped_and_share_mac_keys(self):
         settings = AppSettings.from_dict({"bg_color": "#abc", "bg_opacity": 2, "bg_image_path": "/tmp/wallpaper.jpg", "bg_type": "image"})

@@ -220,6 +220,24 @@ window {{
     background: {card_tint_hover};
     color: {theme};
 }}
+.sidebar-modes {{
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid #d8dfd4;
+    border-radius: 10px;
+    padding: 3px;
+}}
+.sidebar-modes button {{
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    border-radius: 7px;
+    font-weight: 600;
+    padding: 7px 4px;
+}}
+.sidebar-modes button.active {{
+    background: {theme};
+    color: {btn_text};
+}}
 .main-split > separator {{
     min-width: 10px;
     background: rgba(31, 41, 55, 0.08);
@@ -230,7 +248,7 @@ window {{
 .main-split > separator:active {{
     background: {hex_to_rgba_css(theme, 0.45)};
 }}
-.main-split > separator:vertical {{
+.main-split.stacked > separator {{
     min-width: 0;
     min-height: 10px;
     border-top: 1px solid rgba(31, 41, 55, 0.10);
@@ -304,6 +322,63 @@ button.suggested-action:active {{
 .nav-btn {{
     border-radius: 8px;
     padding: 5px 9px;
+}}
+
+/* Notes */
+.notes-page {{
+    margin: 18px 20px 20px;
+}}
+.notes-list-panel, .notes-editor {{
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 14px;
+}}
+.notes-list-panel {{
+    margin-right: 7px;
+}}
+.notes-editor {{
+    margin-left: 7px;
+}}
+.notes-list {{
+    background: transparent;
+}}
+.notes-row {{
+    padding: 10px 11px;
+    border-radius: 9px;
+    margin-bottom: 4px;
+}}
+.notes-row:selected {{
+    background: {card_tint_bg};
+}}
+.notes-row-title {{
+    color: #111827;
+    font-size: {fs(14)}px;
+    font-weight: 700;
+}}
+.notes-row-preview {{
+    color: #6b7280;
+    font-size: {fs(12)}px;
+}}
+.notes-row-date {{
+    color: #9ca3af;
+    font-size: {fs(11)}px;
+}}
+.notes-editor entry {{
+    border-radius: 8px;
+    font-size: {fs(16)}px;
+    font-weight: 700;
+    padding: 8px 10px;
+}}
+.notes-body {{
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+}}
+.notes-body textview, .notes-body text {{
+    background: transparent;
+    color: #1f2937;
+    font-size: {fs(14)}px;
 }}
 
 /* Calendar */

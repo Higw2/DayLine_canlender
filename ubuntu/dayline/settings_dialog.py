@@ -8,29 +8,35 @@ from pathlib import Path
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from .settings import AppSettings, get_settings_manager
 from .theme import BACKGROUND_PALETTE, FONT_SCALE_OPTIONS, PRESET_PALETTE, apply_theme
+from .updater import UpdateController
+from .version import VERSION
 
 
 class SettingsDialog(Adw.PreferencesWindow):
     """Preferences window allowing users to customize colors and font sizes."""
 
-    def __init__(self, parent: Gtk.Window | None = None):
-        super().__init__(title="时序 · 偏好设置")
+    def __init__(self, parent: Gtk.Window | None = None, updater: UpdateController | None = None):
         super().__init__(title="DayLine · 偏好设置")
         if parent:
             self.set_transient_for(parent)
             self.set_modal(True)
         self.set_default_size(560, 480)
         self.manager = get_settings_manager()
+        self.updater = updater
         self._updating_ui = False
         self._swatch_buttons: list[tuple[str, Gtk.Button]] = []
         self._bg_swatch_buttons: list[tuple[str, Gtk.Button]] = []
 
         self._build_ui()
         self._sync_ui_from_settings(self.manager.current)
+        if self.updater:
+            self.updater.add_listener(self._sync_update_status)
+            self._sync_update_status(self.updater)
+            self.connect("close-request", self._remove_update_listener)
 
     def _build_ui(self) -> None:
         page = Adw.PreferencesPage(title="个性化", icon_name="preferences-desktop-theme-symbolic")
@@ -166,6 +172,33 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.font_scale_row.connect("notify::selected", self._on_font_scale_changed)
         font_group.add(self.font_scale_row)
 
+        if self.updater:
+            update_group = Adw.PreferencesGroup(title="软件更新", description="从 GitHub Release 检查并安装 Ubuntu 版本")
+            page.add(update_group)
+            update_group.add(Adw.ActionRow(title="当前版本", subtitle=VERSION))
+            self.auto_updates_row = Adw.SwitchRow(title="自动检查更新", subtitle="DayLine 运行时定期检查")
+            self.auto_updates_row.connect("notify::active", self._on_auto_updates_changed)
+            update_group.add(self.auto_updates_row)
+            self.update_interval_row = Adw.ComboRow(title="检查频率")
+            self._update_intervals = ["six_hours", "daily", "weekly"]
+            self.update_interval_row.set_model(Gtk.StringList.new(["每 6 小时", "每天", "每周"]))
+            self.update_interval_row.connect("notify::selected", self._on_update_interval_changed)
+            update_group.add(self.update_interval_row)
+            self.update_status_row = Adw.ActionRow(title="更新状态")
+            self.check_update_button = Gtk.Button(label="立即检查", valign=Gtk.Align.CENTER)
+            self.check_update_button.connect("clicked", lambda *_: self.updater.check())
+            self.update_status_row.add_suffix(self.check_update_button)
+            update_group.add(self.update_status_row)
+            self.install_update_row = Adw.ActionRow(title="可用更新")
+            self.view_update_button = Gtk.Button(label="查看详情", valign=Gtk.Align.CENTER)
+            self.view_update_button.connect("clicked", lambda *_: Gio.AppInfo.launch_default_for_uri(self.updater.available.page_url, None))
+            self.install_update_row.add_suffix(self.view_update_button)
+            self.install_update_button = Gtk.Button(label="下载并安装", valign=Gtk.Align.CENTER)
+            self.install_update_button.add_css_class("suggested-action")
+            self.install_update_button.connect("clicked", lambda *_: self.updater.install())
+            self.install_update_row.add_suffix(self.install_update_button)
+            update_group.add(self.install_update_row)
+
         # 3. Defaults & Reset Group
         reset_group = Adw.PreferencesGroup()
         page.add(reset_group)
@@ -219,6 +252,9 @@ class SettingsDialog(Adw.PreferencesWindow):
                 key=lambda i: abs(self._font_scales[i] - settings.font_scale),
             )
             self.font_scale_row.set_selected(closest_idx)
+            if self.updater:
+                self.auto_updates_row.set_active(settings.automatic_updates_enabled)
+                self.update_interval_row.set_selected(self._update_intervals.index(settings.update_check_interval))
         finally:
             self._updating_ui = False
 
@@ -317,8 +353,29 @@ class SettingsDialog(Adw.PreferencesWindow):
         apply_theme(self.manager.current)
         self._sync_ui_from_settings(self.manager.current)
 
+    def _on_auto_updates_changed(self, row, _pspec) -> None:
+        if not self._updating_ui:
+            self.manager.update(automatic_updates_enabled=row.get_active())
 
-def open_settings_dialog(parent: Gtk.Window | None = None) -> SettingsDialog:
-    dlg = SettingsDialog(parent=parent)
+    def _on_update_interval_changed(self, row, _pspec) -> None:
+        if not self._updating_ui:
+            self.manager.update(update_check_interval=self._update_intervals[row.get_selected()])
+
+    def _sync_update_status(self, updater: UpdateController) -> None:
+        self.update_status_row.set_subtitle(updater.status)
+        self.check_update_button.set_sensitive(not updater.checking and not updater.installing)
+        self.install_update_row.set_visible(updater.available is not None)
+        if updater.available:
+            self.install_update_row.set_title(f"{updater.available.name}（{updater.available.tag}）")
+            self.install_update_row.set_subtitle(updater.available.notes[:200])
+        self.install_update_button.set_sensitive(not updater.installing)
+
+    def _remove_update_listener(self, *_args) -> bool:
+        self.updater.remove_listener(self._sync_update_status)
+        return False
+
+
+def open_settings_dialog(parent: Gtk.Window | None = None, updater: UpdateController | None = None) -> SettingsDialog:
+    dlg = SettingsDialog(parent=parent, updater=updater)
     dlg.present()
     return dlg
