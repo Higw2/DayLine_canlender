@@ -32,6 +32,15 @@ public final class EventStore {
         try run("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, title TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, alerted_at TEXT, reminder_at TEXT, created_at TEXT NOT NULL)")
         try run("CREATE INDEX IF NOT EXISTS idx_events_schedule ON events(starts_at, ends_at)")
         try run("CREATE INDEX IF NOT EXISTS idx_events_due ON events(completed, alerted_at, reminder_at, starts_at)")
+        try run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, auto_title INTEGER NOT NULL DEFAULT 0)")
+        let columns = try statement("PRAGMA table_info(notes)")
+        var hasAutoTitle = false
+        while sqlite3_step(columns) == SQLITE_ROW {
+            if let name = sqlite3_column_text(columns, 1), String(cString: name) == "auto_title" { hasAutoTitle = true }
+        }
+        sqlite3_finalize(columns)
+        if !hasAutoTitle { try run("ALTER TABLE notes ADD COLUMN auto_title INTEGER NOT NULL DEFAULT 0") }
+        try run("CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC, id DESC)")
     }
     private func statement(_ sql: String) throws -> OpaquePointer? { var s: OpaquePointer?; guard sqlite3_prepare_v2(db, sql, -1, &s, nil) == SQLITE_OK else { throw error() }; return s }
     private func bind(_ statement: OpaquePointer?, _ values: [String?]) { for (i, value) in values.enumerated() { if let value { sqlite3_bind_text(statement, Int32(i + 1), value, -1, sqliteTransient) } else { sqlite3_bind_null(statement, Int32(i + 1)) } } }
@@ -57,6 +66,52 @@ public final class EventStore {
     public func snooze(_ id: Int64, minutes: Int = 10, now: Date = Date()) throws { try mutate("UPDATE events SET alerted_at=NULL,reminder_at=? WHERE id=?", [DateCodec.string(now.addingTimeInterval(TimeInterval(minutes * 60))), String(id)]) }
     public func complete(_ id: Int64, completed: Bool = true, now: Date = Date()) throws { guard let event = try get(id) else { return }; let rearm = !completed && event.startsAt > now; try mutate("UPDATE events SET completed=?,alerted_at=? WHERE id=?", [completed ? "1" : "0", rearm ? nil : DateCodec.string(event.alertedAt ?? now), String(id)]) }
     public func delete(_ id: Int64) throws { try mutate("DELETE FROM events WHERE id=?", [String(id)]) }
+    private func noteContents(body: String, title: String) throws -> (String, Bool) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty {
+            // Python's len() counts Unicode code points, as does unicodeScalars.
+            guard title.unicodeScalars.count <= 120 else { throw DayLineError.noteTitleTooLong }
+            return (title, false)
+        }
+        let firstLine = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "无标题便笺"
+        return (String(String.UnicodeScalarView(firstLine.unicodeScalars.prefix(120))), true)
+    }
+    private func noteTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter(); formatter.locale = DateCodec.formatter.locale
+        formatter.calendar = DateCodec.formatter.calendar; formatter.timeZone = DateCodec.formatter.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
+        return formatter.string(from: date)
+    }
+    public func addNote(body: String, title: String = "", now: Date = Date()) throws -> Note {
+        let (heading, automatic) = try noteContents(body: body, title: title)
+        let timestamp = noteTimestamp(now)
+        try mutate("INSERT INTO notes(title,body,created_at,updated_at,auto_title) VALUES(?,?,?,?,?)", [heading, body, timestamp, timestamp, automatic ? "1" : "0"])
+        guard let note = try getNote(sqlite3_last_insert_rowid(db)) else { throw error("便笺写入失败") }
+        return note
+    }
+    public func updateNote(_ id: Int64, body: String, title: String = "", now: Date = Date()) throws -> Note {
+        guard try getNote(id) != nil else { throw DayLineError.sqlite("便笺不存在") }
+        let (heading, automatic) = try noteContents(body: body, title: title)
+        try mutate("UPDATE notes SET title=?,body=?,auto_title=?,updated_at=? WHERE id=?", [heading, body, automatic ? "1" : "0", noteTimestamp(now), String(id)])
+        guard let note = try getNote(id) else { throw error("便笺写入失败") }
+        return note
+    }
+    public func listNotes() throws -> [Note] { try queryNotes("SELECT id,title,body,created_at,updated_at,auto_title FROM notes ORDER BY updated_at DESC,id DESC", []) }
+    public func getNote(_ id: Int64) throws -> Note? { try queryNotes("SELECT id,title,body,created_at,updated_at,auto_title FROM notes WHERE id=?", [String(id)]).first }
+    public func deleteNote(_ id: Int64) throws { try mutate("DELETE FROM notes WHERE id=?", [String(id)]) }
+    private func queryNotes(_ sql: String, _ values: [String?]) throws -> [Note] {
+        let s = try statement(sql); defer { sqlite3_finalize(s) }; bind(s, values)
+        var notes: [Note] = []
+        while true {
+            let code = sqlite3_step(s)
+            if code == SQLITE_DONE { return notes }
+            guard code == SQLITE_ROW else { throw error() }
+            func text(_ column: Int32) -> String { sqlite3_column_text(s, column).map { String(cString: $0) } ?? "" }
+            guard let created = DateCodec.date(text(3)), let updated = DateCodec.date(text(4)) else { throw DayLineError.sqlite("便笺日期格式无效") }
+            notes.append(Note(id: sqlite3_column_int64(s, 0), title: text(1), body: text(2), createdAt: created, updatedAt: updated, autoTitle: sqlite3_column_int(s, 5) != 0))
+        }
+    }
     private func mutate(_ sql: String, _ values: [String?]) throws { let s = try statement(sql); defer { sqlite3_finalize(s) }; bind(s, values); guard sqlite3_step(s) == SQLITE_DONE else { throw error() } }
     private func query(_ sql: String, _ values: [String?]) throws -> [CalendarEvent] { let s = try statement(sql); defer { sqlite3_finalize(s) }; bind(s, values); var result:[CalendarEvent] = []; while true { let resultCode=sqlite3_step(s); if resultCode == SQLITE_DONE { return result }; guard resultCode == SQLITE_ROW else { throw error() }; result.append(try row(s)) } }
     private func row(_ s: OpaquePointer?) throws -> CalendarEvent { func text(_ n:Int32)->String { sqlite3_column_text(s,n).map { String(cString:$0) } ?? "" }; func optional(_ n:Int32)->Date? { sqlite3_column_type(s,n) == SQLITE_NULL ? nil : DateCodec.date(text(n)) }; guard let start=DateCodec.date(text(2)), let end=DateCodec.date(text(3)) else { throw DayLineError.sqlite("事件日期格式无效") }; return CalendarEvent(id: sqlite3_column_int64(s,0), title:text(1), startsAt:start, endsAt:end, notes:text(4), completed:sqlite3_column_int(s,5) != 0, alertedAt:optional(6), reminderAt:optional(7)) }

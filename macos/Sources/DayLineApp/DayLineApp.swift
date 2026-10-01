@@ -30,25 +30,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         checkReminders(); reminderTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkReminders() } }
         if requested == "desktop" { hideToDesktop() } else { showMain() }
     }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard model.notebook.flush() else { model.showingNotes = true; showMain(); return .terminateCancel }
+        return .terminateNow
+    }
     func applicationWillTerminate(_ notification: Notification) { reminderTimer?.invalidate(); lock = nil }
     private func createWindows() {
         mainWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         mainWindow.title = "DayLine"; mainWindow.center(); mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
         mainWindow.contentView = NSHostingView(rootView: MainView(model: model, updater: updater, showDesktop: { [weak self] in self?.hideToDesktop() }, quit: { NSApp.terminate(nil) }))
-        desktop = DesktopPanel(model: model, openMain: { [weak self] in self?.showMain() }, newEvent: { [weak self] in self?.showMain(); self?.model.presentNewEvent() }, settings: { [weak self] in self?.showSettings() }, quit: { NSApp.terminate(nil) })
+        desktop = DesktopPanel(model: model, openMain: { [weak self] in self?.showMain() }, newEvent: { [weak self] in self?.showMain(); self?.model.presentNewEvent() }, newNote: { [weak self] in self?.newNoteAction() }, settings: { [weak self] in self?.showSettings() }, quit: { NSApp.terminate(nil) })
     }
     private func setupMenu() {
         let menu = NSMenu(); let app = NSMenuItem(); menu.addItem(app); let appMenu = NSMenu(); app.submenu = appMenu
         appMenu.addItem(withTitle: "显示 DayLine", action: #selector(showMainAction), keyEquivalent: "o").target = self
         appMenu.addItem(withTitle: "显示桌面卡片", action: #selector(showDesktopAction), keyEquivalent: "d").target = self
+        let noteItem = appMenu.addItem(withTitle: "新建便笺", action: #selector(newNoteAction), keyEquivalent: "n")
+        noteItem.keyEquivalentModifierMask = [.command, .shift]; noteItem.target = self
         appMenu.addItem(withTitle: "检查更新…", action: #selector(checkForUpdatesAction), keyEquivalent: "").target = self
         appMenu.addItem(.separator()); appMenu.addItem(withTitle: "退出 DayLine", action: #selector(quitAction), keyEquivalent: "q").target = self
+        let editItem = NSMenuItem(); editItem.title = "编辑"; menu.addItem(editItem)
+        let editMenu = NSMenu(title: "编辑"); editItem.submenu = editMenu
+        for (title, action, key) in [("撤销", "undo:", "z"), ("剪切", "cut:", "x"), ("复制", "copy:", "c"), ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
+            editMenu.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+        }
+        let redo = editMenu.insertItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "z", at: 1)
+        redo.keyEquivalentModifierMask = [.command, .shift]
         NSApp.mainMenu = menu
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); statusItem = item; item.button?.title = "◷"; let status = NSMenu(); status.addItem(withTitle: "打开 DayLine", action: #selector(showMainAction), keyEquivalent: "").target = self; status.addItem(withTitle: "新建事件", action: #selector(newEventAction), keyEquivalent: "").target = self; status.addItem(withTitle: "检查更新…", action: #selector(checkForUpdatesAction), keyEquivalent: "").target = self; status.addItem(.separator()); status.addItem(withTitle: "退出", action: #selector(quitAction), keyEquivalent: "").target = self; item.menu = status
+        status.insertItem(withTitle: "新建便笺", action: #selector(newNoteAction), keyEquivalent: "", at: 2).target = self
     }
+    @objc func newNoteAction() { showMain(); model.showingNotes = true; model.notebook.newNote() }
     @objc func showMainAction() { showMain() }; @objc func showDesktopAction() { hideToDesktop() }; @objc func newEventAction() { showMain(); model.presentNewEvent() }; @objc func checkForUpdatesAction() { showSettings(); updater.checkNow() }; @objc func quitAction() { NSApp.terminate(nil) }
     func showMain() { desktop.orderOut(nil); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    func hideToDesktop() { mainWindow.orderOut(nil); desktop.show() }
+    func hideToDesktop() {
+        guard model.notebook.flush() else { model.showingNotes = true; return }
+        mainWindow.orderOut(nil); desktop.show()
+    }
     func showSettings() { showMain(); model.showSettings = true }
     private func handle(_ command: String) { if command == "quit" { NSApp.terminate(nil) } else if command == "desktop" { hideToDesktop() } else { showMain() } }
     private func checkReminders() {
@@ -58,8 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 }
 extension AppDelegate: NSWindowDelegate { func windowShouldClose(_ sender: NSWindow) -> Bool { hideToDesktop(); return false } }
 
+@MainActor
 final class DayLineModel: ObservableObject {
     let store: EventStore
+    let notebook: NotebookModel
     let settingsStore = SettingsStore()
     @Published var selectedDay = Calendar.current.startOfDay(for: Date())
     @Published var events: [CalendarEvent] = []
@@ -69,8 +89,13 @@ final class DayLineModel: ObservableObject {
     @Published var draftRange: (Date, Date)?
     @Published var showingEditor = false
     @Published var showSettings = false
+    @Published var showingNotes = false
     @Published var message: String?
-    init() { do { store = try EventStore() } catch { fatalError("DayLine database: \(error)") }; settings = settingsStore.current }
+    init() { do { store = try EventStore() } catch { fatalError("DayLine database: \(error)") }; notebook = NotebookModel(store: store); settings = settingsStore.current }
+    @discardableResult func showSchedule() -> Bool {
+        guard notebook.flush() else { showingNotes = true; return false }
+        showingNotes = false; return true
+    }
     func reload() { do { events = try store.events(on: selectedDay); upcoming = try store.upcoming(); } catch { message = error.localizedDescription } }
     func go(_ days: Int) { selectedDay = Calendar.current.date(byAdding: .day, value: days, to: selectedDay)!; reload() }
     func presentNewEvent(_ range: (Date, Date)? = nil) { editing = nil; draftRange = range; showingEditor = true }
@@ -117,7 +142,8 @@ struct MainView: View {
             AdaptiveMainSplitView(sidebarRatio: model.settings.sidebarRatio, onRatioChange: { model.persistSidebarRatio($0) }) {
                 sidebar
             } detail: {
-                detail
+                if model.showingNotes { NotesView(notebook: model.notebook, settings: model.settings) }
+                else { detail }
             }
         }
         .frame(minWidth: 840, minHeight: 600)
@@ -157,7 +183,13 @@ struct MainView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("DayLine").font(.system(size: 23, weight: .bold)).foregroundStyle(Color(hex: model.settings.themeColor))
-                Button("返回今天") { returnToToday() }
+                HStack {
+                    Button { model.showSchedule() } label: { Label("日程", systemImage: "calendar") }
+                        .tint(model.showingNotes ? .secondary : Color(hex: model.settings.themeColor))
+                    Button { model.showingNotes = true } label: { Label("随手记", systemImage: "note.text") }
+                        .tint(model.showingNotes ? Color(hex: model.settings.themeColor) : .secondary)
+                }.buttonStyle(.bordered)
+                Button("返回今天") { if model.showSchedule() { returnToToday() } }
                     .buttonStyle(.borderedProminent).tint(Color(hex: model.settings.themeColor))
                 ResponsiveMonthCalendarView(
                     selectedDate: $model.selectedDay,

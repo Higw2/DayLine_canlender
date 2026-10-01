@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "DayLineCore", dependencies: ["CSQLite"]),
         .executableTarget(name: "DayLineApp", dependencies: ["DayLineCore"]),
         .executableTarget(name: "DayLineUpdaterHelper"),
-        .testTarget(name: "DayLineCoreTests", dependencies: ["DayLineCore"])
+        .testTarget(name: "DayLineCoreTests", dependencies: ["DayLineCore", "CSQLite"])
     ],
     swiftLanguageVersions: [.v5]
 )

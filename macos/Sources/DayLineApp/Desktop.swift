@@ -49,7 +49,7 @@ final class DesktopPanel: NSPanel {
     private let model: DayLineModel
     private let geometryURL = DataPaths.shared.geometry
 
-    init(model: DayLineModel, openMain: @escaping () -> Void, newEvent: @escaping () -> Void, settings: @escaping () -> Void, quit: @escaping () -> Void) {
+    init(model: DayLineModel, openMain: @escaping () -> Void, newEvent: @escaping () -> Void, newNote: @escaping () -> Void, settings: @escaping () -> Void, quit: @escaping () -> Void) {
         self.model = model
         super.init(contentRect: NSRect(x: 120, y: 130, width: 390, height: 300), styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
         title = "DayLine 桌面卡片"
@@ -65,7 +65,7 @@ final class DesktopPanel: NSPanel {
         titleVisibility = .hidden
         isMovableByWindowBackground = true
 
-        contentView = NSHostingView(rootView: DesktopCard(model: model, openMain: openMain, newEvent: newEvent, settings: settings, quit: quit))
+        contentView = NSHostingView(rootView: DesktopCard(model: model, openMain: openMain, newEvent: newEvent, newNote: newNote, settings: settings, quit: quit))
         loadGeometry()
         NotificationCenter.default.addObserver(self, selector: #selector(saveGeometry), name: NSWindow.didMoveNotification, object: self)
         NotificationCenter.default.addObserver(self, selector: #selector(saveGeometry), name: NSWindow.didResizeNotification, object: self)
@@ -103,6 +103,7 @@ struct DesktopCard: View {
     @ObservedObject var model: DayLineModel
     let openMain: () -> Void
     let newEvent: () -> Void
+    let newNote: () -> Void
     let settings: () -> Void
     let quit: () -> Void
 
@@ -207,6 +208,13 @@ struct DesktopCard: View {
                             .font(.system(size: 11 * model.settings.fontScale))
                     }
                     .buttonStyle(.bordered)
+
+                    Button(action: newNote) {
+                        Image(systemName: "note.text.badge.plus")
+                            .font(.system(size: 11 * model.settings.fontScale))
+                    }
+                    .buttonStyle(.bordered)
+                    .help("新建便笺").accessibilityLabel("新建便笺")
 
                     Button(action: settings) {
                         Image(systemName: "gearshape")

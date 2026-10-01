@@ -1,5 +1,14 @@
 import Foundation
 
+public struct Note: Identifiable, Equatable, Sendable {
+    public let id: Int64
+    public let title: String
+    public let body: String
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let autoTitle: Bool
+}
+
 public struct CalendarEvent: Identifiable, Equatable, Sendable {
     public let id: Int64
     public var title: String
@@ -19,11 +28,12 @@ public struct CalendarEvent: Identifiable, Equatable, Sendable {
 }
 
 public enum DayLineError: LocalizedError, Equatable {
-    case emptyTitle, titleTooLong, invalidDates, sqlite(String)
+    case emptyTitle, titleTooLong, noteTitleTooLong, invalidDates, sqlite(String)
     public var errorDescription: String? {
         switch self {
         case .emptyTitle: return "请填写事件名称"
         case .titleTooLong: return "事件名称不能超过 120 个字符"
+        case .noteTitleTooLong: return "便笺标题不能超过 120 个字符"
         case .invalidDates: return "结束时间必须晚于开始时间"
         case .sqlite(let message): return "数据库错误：\(message)"
         }
@@ -39,6 +49,8 @@ public enum DateCodec {
     public static func string(_ date: Date) -> String { formatter.string(from: date) }
     public static func date(_ value: String) -> Date? {
         if let date = formatter.date(from: value) { return date }
+        let fractionalFormatter = DateFormatter(); fractionalFormatter.locale = formatter.locale; fractionalFormatter.calendar = formatter.calendar; fractionalFormatter.timeZone = formatter.timeZone; fractionalFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
+        if let date = fractionalFormatter.date(from: value) { return date }
         let minuteFormatter = DateFormatter(); minuteFormatter.locale = Locale(identifier: "en_US_POSIX"); minuteFormatter.calendar = Calendar(identifier: .gregorian); minuteFormatter.timeZone = .current; minuteFormatter.dateFormat = "yyyy-MM-dd HH:mm"
         return minuteFormatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
