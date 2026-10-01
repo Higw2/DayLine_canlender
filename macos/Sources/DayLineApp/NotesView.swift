@@ -1,11 +1,12 @@
 import SwiftUI
 import DayLineCore
+import DayLineTextInput
 
 struct NotesView: View {
     @ObservedObject var notebook: NotebookModel
     let settings: AppSettings
     @State private var confirmingDelete = false
-    @FocusState private var bodyFocused: Bool
+    @State private var bodyFocusRequest: UInt64 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +15,7 @@ struct NotesView: View {
                 Spacer()
                 Text("\(notebook.notes.count) 条便笺").foregroundStyle(.secondary)
                 Button {
-                    if notebook.newNote() { bodyFocused = true }
+                    if notebook.newNote() { bodyFocusRequest &+= 1 }
                 } label: { Label("新建便笺", systemImage: "plus") }
                 .buttonStyle(.borderedProminent)
             }
@@ -84,11 +85,10 @@ struct NotesView: View {
 
     private var editor: some View {
         VStack(spacing: 10) {
-            TextField("标题（可选）", text: $notebook.title)
-                .textFieldStyle(.roundedBorder).accessibilityLabel("便笺标题")
-            TextEditor(text: $notebook.body)
-                .font(.system(size: 14 * settings.fontScale))
-                .focused($bodyFocused).accessibilityLabel("便笺正文")
+            NoteTextInput(text: $notebook.title, revision: notebook.draftRevision, fontSize: 13 * settings.fontScale, singleLine: true, label: "便笺标题（可选）")
+                .frame(height: 28 * settings.fontScale)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
+            NoteTextInput(text: $notebook.body, revision: notebook.draftRevision, fontSize: 14 * settings.fontScale, label: "便笺正文", focusRequest: bodyFocusRequest)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
             ViewThatFits(in: .horizontal) {
                 HStack { Text(notebook.status).foregroundStyle(.secondary); Spacer(); editorActions }

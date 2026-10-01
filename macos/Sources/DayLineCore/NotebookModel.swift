@@ -9,6 +9,10 @@ public final class NotebookModel: ObservableObject {
     private var loading = false
     private var savedTitle = ""
     private var savedBody = ""
+    /// UI adapter commits marked text for explicit save/navigation/quit only.
+    /// Autosave must never interrupt an active input-method composition.
+    public var prepareToSave: (() -> Void)?
+    @Published public private(set) var draftRevision: UInt64 = 0
     @Published public private(set) var notes: [Note] = []
     @Published public private(set) var selectedID: Int64?
     @Published public var title = "" { didSet { changed() } }
@@ -30,11 +34,12 @@ public final class NotebookModel: ObservableObject {
         pendingSave = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 600_000_000) } catch { return }
             guard !Task.isCancelled else { return }
-            self?.flush()
+            self?.flush(commitInput: false)
         }
     }
 
-    @discardableResult public func flush(now: Date = Date()) -> Bool {
+    @discardableResult public func flush(now: Date = Date(), commitInput: Bool = true) -> Bool {
+        if commitInput { prepareToSave?() }
         pendingSave?.cancel(); pendingSave = nil
         guard title != savedTitle || body != savedBody else { return true }
         if selectedID == nil && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -72,6 +77,7 @@ public final class NotebookModel: ObservableObject {
         loading = true
         selectedID = note?.id; title = note.map { $0.autoTitle ? "" : $0.title } ?? ""; body = note?.body ?? ""
         savedTitle = title; savedBody = body; loading = false
+        draftRevision &+= 1
         status = note == nil ? "开始输入，内容会自动保存" : "已保存"
     }
 

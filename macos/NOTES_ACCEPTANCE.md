@@ -1,5 +1,14 @@
 # 随手记验收（2026-10-02）
 
+## 中文输入法修复补充
+
+- 标题和正文改为保留原生 AppKit 编辑状态的文本控件。相同草稿的 SwiftUI 更新、便笺首次自动创建及列表刷新不再回写文本，不重置光标、选区或候选文字。
+- 依据 [Apple 的 marked text API](https://developer.apple.com/documentation/appkit/nstextinputclient/setmarkedtext(_:selectedrange:replacementrange:)) 区分输入法组合文字与已确认文本。候选文字不触发自动保存；已确认文本正常进入 600ms 自动保存流程。
+- 显式保存、切换、收起和退出前确认当前文本；自动保存不会强行结束输入法组合。仅新建、打开其他便笺或删除时更新草稿版本以加载不同内容，自动保存得到的便笺 ID 不影响编辑器身份。
+- `swift test --scratch-path /private/tmp/dayline-ime-build`：31/31 通过。新增 4 项 AppKit 回归测试直接调用组合输入 API，覆盖候选文字等待期间跨过自动保存时点、模型旧值刷新、光标及组合区保持、确认中文后保存、显式保存组合文字、标题和草稿切换。
+- 实际界面验收使用 `io.github.dayline.IMEQA.20261002` 和 `/private/tmp/dayline-ime-qa/data`：中文标题及多行正文保存；正文中间插入、等待自动保存后继续输入，光标仍位于原位置；撤销正常。系统拼音候选选择流程未作为人工验收结论，组合输入由上述 AppKit 回归测试验证。
+- 发布构建、ZIP 校验和解压后严格签名检查通过。
+
 ## 实现
 
 - macOS 独立便笺页，侧栏“随手记”切换，桌面卡片及菜单可新建便笺。

@@ -12,9 +12,10 @@ let package = Package(
     targets: [
         .systemLibrary(name: "CSQLite", path: "Sources/CSQLite"),
         .target(name: "DayLineCore", dependencies: ["CSQLite"]),
-        .executableTarget(name: "DayLineApp", dependencies: ["DayLineCore"]),
+        .target(name: "DayLineTextInput"),
+        .executableTarget(name: "DayLineApp", dependencies: ["DayLineCore", "DayLineTextInput"]),
         .executableTarget(name: "DayLineUpdaterHelper"),
-        .testTarget(name: "DayLineCoreTests", dependencies: ["DayLineCore", "CSQLite"])
+        .testTarget(name: "DayLineCoreTests", dependencies: ["DayLineCore", "DayLineTextInput", "CSQLite"])
     ],
     swiftLanguageVersions: [.v5]
 )

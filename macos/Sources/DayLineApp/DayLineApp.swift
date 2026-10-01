@@ -3,6 +3,7 @@ import SwiftUI
 import UserNotifications
 import ServiceManagement
 import DayLineCore
+import DayLineTextInput
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -91,7 +92,7 @@ final class DayLineModel: ObservableObject {
     @Published var showSettings = false
     @Published var showingNotes = false
     @Published var message: String?
-    init() { do { store = try EventStore() } catch { fatalError("DayLine database: \(error)") }; notebook = NotebookModel(store: store); settings = settingsStore.current }
+    init() { do { store = try EventStore() } catch { fatalError("DayLine database: \(error)") }; notebook = NotebookModel(store: store); notebook.prepareToSave = { NoteTextView.commitFocusedInput() }; settings = settingsStore.current }
     @discardableResult func showSchedule() -> Bool {
         guard notebook.flush() else { showingNotes = true; return false }
         showingNotes = false; return true
