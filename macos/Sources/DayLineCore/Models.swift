@@ -18,13 +18,31 @@ public struct CalendarEvent: Identifiable, Equatable, Sendable {
     public var completed: Bool
     public var alertedAt: Date?
     public var reminderAt: Date?
+    public var preAlertedAt: Date?
 
-    public init(id: Int64 = 0, title: String, startsAt: Date, endsAt: Date, notes: String = "", completed: Bool = false, alertedAt: Date? = nil, reminderAt: Date? = nil) {
+    public init(id: Int64 = 0, title: String, startsAt: Date, endsAt: Date, notes: String = "", completed: Bool = false, alertedAt: Date? = nil, reminderAt: Date? = nil, preAlertedAt: Date? = nil) {
         self.id = id; self.title = title; self.startsAt = startsAt; self.endsAt = endsAt
         self.notes = notes; self.completed = completed; self.alertedAt = alertedAt; self.reminderAt = reminderAt
+        self.preAlertedAt = preAlertedAt
     }
 
     public var dueAt: Date { reminderAt ?? startsAt }
+}
+
+public enum ReminderStage: String, Sendable {
+    case advance, due
+    public var heading: String { self == .advance ? "事件即将开始" : "该做这件事了" }
+}
+
+public struct ReminderDelivery: Equatable, Sendable {
+    public let event: CalendarEvent
+    public let stage: ReminderStage
+}
+
+public enum AdvanceReminderInterval: Int, Codable, CaseIterable, Identifiable, Sendable {
+    case fiveMinutes = 5, tenMinutes = 10, fifteenMinutes = 15, thirtyMinutes = 30
+    public var id: Int { rawValue }
+    public var title: String { "提前 \(rawValue) 分钟" }
 }
 
 public enum DayLineError: LocalizedError, Equatable {
@@ -70,6 +88,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var sidebarRatio: Double = Double(MainSplitLayout.defaultRatio)
     public var automaticUpdatesEnabled: Bool = false
     public var updateCheckInterval: UpdateCheckInterval = .daily
+    public var advanceReminderInterval: AdvanceReminderInterval = .fiveMinutes
     public init() {}
     enum CodingKeys: String, CodingKey {
         case themeColor = "theme_color"
@@ -83,6 +102,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case sidebarRatio = "sidebar_ratio"
         case automaticUpdatesEnabled = "automatic_updates_enabled"
         case updateCheckInterval = "update_check_interval"
+        case advanceReminderInterval = "advance_reminder_minutes"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -105,6 +125,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         sidebarRatio = Double(MainSplitLayout.clampedRatio(CGFloat(ratio)))
         automaticUpdatesEnabled = try c.decodeIfPresent(Bool.self, forKey: .automaticUpdatesEnabled) ?? false
         updateCheckInterval = (try? c.decode(UpdateCheckInterval.self, forKey: .updateCheckInterval)) ?? .daily
+        advanceReminderInterval = (try? c.decode(AdvanceReminderInterval.self, forKey: .advanceReminderInterval)) ?? .fiveMinutes
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -119,6 +140,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try c.encode(sidebarRatio, forKey: .sidebarRatio)
         try c.encode(automaticUpdatesEnabled, forKey: .automaticUpdatesEnabled)
         try c.encode(updateCheckInterval, forKey: .updateCheckInterval)
+        try c.encode(advanceReminderInterval, forKey: .advanceReminderInterval)
     }
 }
 

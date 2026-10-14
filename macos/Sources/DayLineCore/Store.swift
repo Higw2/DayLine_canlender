@@ -19,6 +19,7 @@ public final class DataPaths {
 
 public final class EventStore {
     private var db: OpaquePointer?
+    private let eventSelect = "SELECT id,title,starts_at,ends_at,notes,completed,alerted_at,reminder_at,pre_alerted_at FROM events"
     public let path: URL
     public init(path: URL = DataPaths.shared.database) throws {
         self.path = path; try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -32,6 +33,14 @@ public final class EventStore {
         try run("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, title TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, alerted_at TEXT, reminder_at TEXT, created_at TEXT NOT NULL)")
         try run("CREATE INDEX IF NOT EXISTS idx_events_schedule ON events(starts_at, ends_at)")
         try run("CREATE INDEX IF NOT EXISTS idx_events_due ON events(completed, alerted_at, reminder_at, starts_at)")
+        let eventColumns = try statement("PRAGMA table_info(events)")
+        var hasPreAlert = false
+        while sqlite3_step(eventColumns) == SQLITE_ROW {
+            if let name = sqlite3_column_text(eventColumns, 1), String(cString: name) == "pre_alerted_at" { hasPreAlert = true }
+        }
+        sqlite3_finalize(eventColumns)
+        if !hasPreAlert { try run("ALTER TABLE events ADD COLUMN pre_alerted_at TEXT") }
+        try run("CREATE INDEX IF NOT EXISTS idx_events_advance ON events(completed,pre_alerted_at,starts_at)")
         try run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, auto_title INTEGER NOT NULL DEFAULT 0)")
         let columns = try statement("PRAGMA table_info(notes)")
         var hasAutoTitle = false
@@ -53,18 +62,45 @@ public final class EventStore {
     public func update(id: Int64, title: String, startsAt: Date, endsAt: Date, notes: String = "", now: Date = Date()) throws -> CalendarEvent {
         let old = try get(id); guard let old else { throw DayLineError.sqlite("事件不存在") }; let (title, start, end) = try validate(title, startsAt, endsAt)
         let changed = start != old.startsAt || end != old.endsAt; let rearm = changed && start > now && !old.completed
-        let s = try statement("UPDATE events SET title=?,starts_at=?,ends_at=?,notes=?,alerted_at=?,reminder_at=? WHERE id=?"); defer { sqlite3_finalize(s) }
-        bind(s, [title, DateCodec.string(start), DateCodec.string(end), notes.trimmingCharacters(in: .whitespacesAndNewlines), rearm ? nil : old.alertedAt.map(DateCodec.string), rearm ? nil : old.reminderAt.map(DateCodec.string)])
-        sqlite3_bind_int64(s, 7, id); guard sqlite3_step(s) == SQLITE_DONE else { throw error() }; return try get(id)!
+        let s = try statement("UPDATE events SET title=?,starts_at=?,ends_at=?,notes=?,alerted_at=?,reminder_at=?,pre_alerted_at=? WHERE id=?"); defer { sqlite3_finalize(s) }
+        bind(s, [title, DateCodec.string(start), DateCodec.string(end), notes.trimmingCharacters(in: .whitespacesAndNewlines), rearm ? nil : old.alertedAt.map(DateCodec.string), rearm ? nil : old.reminderAt.map(DateCodec.string), rearm && start != old.startsAt ? nil : old.preAlertedAt.map(DateCodec.string)])
+        sqlite3_bind_int64(s, 8, id); guard sqlite3_step(s) == SQLITE_DONE else { throw error() }; return try get(id)!
     }
-    public func get(_ id: Int64) throws -> CalendarEvent? { try query("SELECT * FROM events WHERE id=?", [String(id)]).first }
-    public func events(on day: Date, calendar: Calendar = .current) throws -> [CalendarEvent] { let start = calendar.startOfDay(for: day), end = calendar.date(byAdding: .day, value: 1, to: start)!; return try query("SELECT * FROM events WHERE starts_at < ? AND ends_at > ? ORDER BY starts_at,id", [DateCodec.string(end), DateCodec.string(start)]) }
-    public func upcoming(limit: Int = 5, now: Date = Date()) throws -> [CalendarEvent] { try query("SELECT * FROM events WHERE completed=0 AND ends_at >= ? ORDER BY starts_at,id LIMIT ?", [DateCodec.string(now), String(limit)]) }
-    public func due(now: Date = Date()) throws -> [CalendarEvent] { let old = now.addingTimeInterval(-86_400); return try query("SELECT * FROM events WHERE completed=0 AND alerted_at IS NULL AND COALESCE(reminder_at,starts_at) BETWEEN ? AND ? ORDER BY COALESCE(reminder_at,starts_at),id", [DateCodec.string(old), DateCodec.string(now)]) }
+    public func get(_ id: Int64) throws -> CalendarEvent? { try query("\(eventSelect) WHERE id=?", [String(id)]).first }
+    public func events(on day: Date, calendar: Calendar = .current) throws -> [CalendarEvent] { let start = calendar.startOfDay(for: day), end = calendar.date(byAdding: .day, value: 1, to: start)!; return try query("\(eventSelect) WHERE starts_at < ? AND ends_at > ? ORDER BY starts_at,id", [DateCodec.string(end), DateCodec.string(start)]) }
+    public func upcoming(limit: Int = 5, now: Date = Date()) throws -> [CalendarEvent] { try query("\(eventSelect) WHERE completed=0 AND ends_at >= ? ORDER BY starts_at,id LIMIT ?", [DateCodec.string(now), String(limit)]) }
+    public func due(now: Date = Date()) throws -> [CalendarEvent] { let old = now.addingTimeInterval(-86_400); return try query("\(eventSelect) WHERE completed=0 AND alerted_at IS NULL AND COALESCE(reminder_at,starts_at) BETWEEN ? AND ? ORDER BY COALESCE(reminder_at,starts_at),id", [DateCodec.string(old), DateCodec.string(now)]) }
+    public func advanceDue(minutes: Int = 5, now: Date = Date()) throws -> [CalendarEvent] {
+        guard minutes > 0 else { return [] }
+        return try query("\(eventSelect) WHERE completed=0 AND pre_alerted_at IS NULL AND alerted_at IS NULL AND reminder_at IS NULL AND starts_at > ? AND starts_at <= ? ORDER BY starts_at,id", [DateCodec.string(now), DateCodec.string(now.addingTimeInterval(TimeInterval(minutes) * 60))])
+    }
+    /// Atomically record both stages before presenting UI, so a restart or a
+    /// second connection cannot deliver the same stage again.
+    public func takeReminders(advanceMinutes: Int = 5, now: Date = Date()) throws -> [ReminderDelivery] {
+        try run("BEGIN IMMEDIATE")
+        do {
+            _ = try expireStale(now: now)
+            var deliveries: [ReminderDelivery] = []
+            for event in try due(now: now) {
+                try markAlerted(event.id, now: now)
+                deliveries.append(ReminderDelivery(event: event, stage: .due))
+            }
+            for event in try advanceDue(minutes: advanceMinutes, now: now) {
+                try mutate("UPDATE events SET pre_alerted_at=? WHERE id=?", [DateCodec.string(now), String(event.id)])
+                deliveries.append(ReminderDelivery(event: event, stage: .advance))
+            }
+            try run("COMMIT")
+            return deliveries
+        } catch { try? run("ROLLBACK"); throw error }
+    }
     @discardableResult public func expireStale(now: Date = Date()) throws -> Int { let s = try statement("UPDATE events SET alerted_at=? WHERE completed=0 AND alerted_at IS NULL AND COALESCE(reminder_at,starts_at) < ?"); defer { sqlite3_finalize(s) }; bind(s,[DateCodec.string(now),DateCodec.string(now.addingTimeInterval(-86_400))]); guard sqlite3_step(s) == SQLITE_DONE else { throw error() }; return Int(sqlite3_changes(db)) }
     public func markAlerted(_ id: Int64, now: Date = Date()) throws { try mutate("UPDATE events SET alerted_at=?,reminder_at=NULL WHERE id=?", [DateCodec.string(now), String(id)]) }
     public func snooze(_ id: Int64, minutes: Int = 10, now: Date = Date()) throws { try mutate("UPDATE events SET alerted_at=NULL,reminder_at=? WHERE id=?", [DateCodec.string(now.addingTimeInterval(TimeInterval(minutes * 60))), String(id)]) }
-    public func complete(_ id: Int64, completed: Bool = true, now: Date = Date()) throws { guard let event = try get(id) else { return }; let rearm = !completed && event.startsAt > now; try mutate("UPDATE events SET completed=?,alerted_at=? WHERE id=?", [completed ? "1" : "0", rearm ? nil : DateCodec.string(event.alertedAt ?? now), String(id)]) }
+    public func complete(_ id: Int64, completed: Bool = true, now: Date = Date()) throws {
+        guard let event = try get(id), event.completed != completed else { return }
+        let rearm = !completed && event.startsAt > now
+        try mutate("UPDATE events SET completed=?,alerted_at=?,reminder_at=NULL,pre_alerted_at=? WHERE id=?", [completed ? "1" : "0", rearm ? nil : DateCodec.string(event.alertedAt ?? now), rearm ? nil : event.preAlertedAt.map(DateCodec.string), String(id)])
+    }
     public func delete(_ id: Int64) throws { try mutate("DELETE FROM events WHERE id=?", [String(id)]) }
     private func noteContents(body: String, title: String) throws -> (String, Bool) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -114,7 +150,7 @@ public final class EventStore {
     }
     private func mutate(_ sql: String, _ values: [String?]) throws { let s = try statement(sql); defer { sqlite3_finalize(s) }; bind(s, values); guard sqlite3_step(s) == SQLITE_DONE else { throw error() } }
     private func query(_ sql: String, _ values: [String?]) throws -> [CalendarEvent] { let s = try statement(sql); defer { sqlite3_finalize(s) }; bind(s, values); var result:[CalendarEvent] = []; while true { let resultCode=sqlite3_step(s); if resultCode == SQLITE_DONE { return result }; guard resultCode == SQLITE_ROW else { throw error() }; result.append(try row(s)) } }
-    private func row(_ s: OpaquePointer?) throws -> CalendarEvent { func text(_ n:Int32)->String { sqlite3_column_text(s,n).map { String(cString:$0) } ?? "" }; func optional(_ n:Int32)->Date? { sqlite3_column_type(s,n) == SQLITE_NULL ? nil : DateCodec.date(text(n)) }; guard let start=DateCodec.date(text(2)), let end=DateCodec.date(text(3)) else { throw DayLineError.sqlite("事件日期格式无效") }; return CalendarEvent(id: sqlite3_column_int64(s,0), title:text(1), startsAt:start, endsAt:end, notes:text(4), completed:sqlite3_column_int(s,5) != 0, alertedAt:optional(6), reminderAt:optional(7)) }
+    private func row(_ s: OpaquePointer?) throws -> CalendarEvent { func text(_ n:Int32)->String { sqlite3_column_text(s,n).map { String(cString:$0) } ?? "" }; func optional(_ n:Int32)->Date? { sqlite3_column_type(s,n) == SQLITE_NULL ? nil : DateCodec.date(text(n)) }; guard let start=DateCodec.date(text(2)), let end=DateCodec.date(text(3)) else { throw DayLineError.sqlite("事件日期格式无效") }; return CalendarEvent(id: sqlite3_column_int64(s,0), title:text(1), startsAt:start, endsAt:end, notes:text(4), completed:sqlite3_column_int(s,5) != 0, alertedAt:optional(6), reminderAt:optional(7), preAlertedAt:optional(8)) }
 }
 
 public final class SettingsStore {

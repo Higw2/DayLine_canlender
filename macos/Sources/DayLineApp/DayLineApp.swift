@@ -71,9 +71,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func showSettings() { showMain(); model.showSettings = true }
     private func handle(_ command: String) { if command == "quit" { NSApp.terminate(nil) } else if command == "desktop" { hideToDesktop() } else { showMain() } }
     private func checkReminders() {
-        do { _ = try model.store.expireStale(); for event in try model.store.due() { try model.store.markAlerted(event.id); model.reload(); postNotification(event); let panel = ReminderPanel(event: event, model: model); panel.onClosed = { [weak self, weak panel] in if let panel { self?.reminderPanels.removeAll { $0 === panel } } }; reminderPanels.append(panel); panel.show() } } catch { NSLog("DayLine reminder error: \(error)") }
+        do {
+            let now = Date()
+            let deliveries = try model.store.takeReminders(advanceMinutes: model.settings.advanceReminderInterval.rawValue, now: now)
+            // Due reminders replace advance UI; stale windows lose their actions.
+            for panel in reminderPanels {
+                if try !panel.isCurrent(in: model.store, now: now) { panel.close() }
+            }
+            if !deliveries.isEmpty { model.reload() }
+            for delivery in deliveries {
+                postNotification(delivery)
+                let panel = ReminderPanel(delivery: delivery, model: model)
+                panel.onClosed = { [weak self, weak panel] in
+                    if let panel { self?.reminderPanels.removeAll { $0 === panel } }
+                }
+                reminderPanels.append(panel); panel.show()
+            }
+        } catch { NSLog("DayLine reminder error: \(error)") }
     }
-    private func postNotification(_ event: CalendarEvent) { let content = UNMutableNotificationContent(); content.title = "该做这件事了"; content.body = event.title; content.sound = .default; let request = UNNotificationRequest(identifier: "dayline.\(event.id).\(Date().timeIntervalSince1970)", content: content, trigger: nil); UNUserNotificationCenter.current().add(request) }
+    private func postNotification(_ delivery: ReminderDelivery) {
+        let event = delivery.event
+        let content = UNMutableNotificationContent()
+        content.title = delivery.stage == .due && event.reminderAt != nil ? "推迟的提醒已到" : delivery.stage.heading
+        content.body = "\(event.title) · 原定 \(event.startsAt.formatted(.dateTime.month().day().hour().minute()))"
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "dayline.\(event.id).\(delivery.stage.rawValue).\(Date().timeIntervalSince1970)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
 }
 extension AppDelegate: NSWindowDelegate { func windowShouldClose(_ sender: NSWindow) -> Bool { hideToDesktop(); return false } }
 
@@ -529,6 +553,23 @@ struct SettingsView: View {
                             Text("macOS 可能会在「系统设置 -> 登录项」中提示授权。").font(.caption).foregroundStyle(.secondary)
                         }
                         .padding(6)
+                    }
+
+                    GroupBox("事件提醒") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("预提醒时间", selection: Binding(get: {
+                                model.settings.advanceReminderInterval
+                            }, set: {
+                                model.settings.advanceReminderInterval = $0
+                                model.persistSettings()
+                            })) {
+                                ForEach(AdvanceReminderInterval.allCases) { interval in
+                                    Text(interval.title).tag(interval)
+                                }
+                            }
+                            Text("开始前先提醒一次；到设定时间再次提醒，并提供“已完成”和“推迟 10 分钟”。推迟后只重复到点提醒。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.padding(6)
                     }
 
                     GroupBox("软件更新") {
