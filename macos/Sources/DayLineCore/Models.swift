@@ -32,6 +32,8 @@ public struct CalendarEvent: Identifiable, Equatable, Sendable {
 public enum ReminderStage: String, Sendable {
     case advance, due
     public var heading: String { self == .advance ? "事件即将开始" : "该做这件事了" }
+    /// Due events use the system notification only; there is no action popup.
+    public var presentsPanel: Bool { self == .advance }
 }
 
 public struct ReminderDelivery: Equatable, Sendable {

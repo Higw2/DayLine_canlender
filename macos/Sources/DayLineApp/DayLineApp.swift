@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var desktop: DesktopPanel!
     private var reminderTimer: Timer?
     private var lock: SingleInstance?
-    private var reminderPanels: [ReminderPanel] = []
+    private var reminderPanels: [AdvanceReminderPanel] = []
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -74,14 +74,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         do {
             let now = Date()
             let deliveries = try model.store.takeReminders(advanceMinutes: model.settings.advanceReminderInterval.rawValue, now: now)
-            // Due reminders replace advance UI; stale windows lose their actions.
+            // Advance panels expire at the start time. Due delivery is a system
+            // notification only, with no completion/snooze window.
             for panel in reminderPanels {
                 if try !panel.isCurrent(in: model.store, now: now) { panel.close() }
             }
             if !deliveries.isEmpty { model.reload() }
             for delivery in deliveries {
                 postNotification(delivery)
-                let panel = ReminderPanel(delivery: delivery, model: model)
+                guard delivery.stage.presentsPanel else { continue }
+                let panel = AdvanceReminderPanel(event: delivery.event)
                 panel.onClosed = { [weak self, weak panel] in
                     if let panel { self?.reminderPanels.removeAll { $0 === panel } }
                 }
@@ -127,6 +129,15 @@ final class DayLineModel: ObservableObject {
     @discardableResult func save(title: String, start: Date, end: Date, notes: String) -> Bool { do { if let event = editing { _ = try store.update(id: event.id, title: title, startsAt: start, endsAt: end, notes: notes) } else { _ = try store.add(title: title, startsAt: start, endsAt: end, notes: notes) }; editing = nil; draftRange = nil; showingEditor = false; reload(); return true } catch { message = error.localizedDescription; return false } }
     func complete(_ event: CalendarEvent, completed: Bool = true) { do { try store.complete(event.id, completed: completed); reload() } catch { message = error.localizedDescription } }
     func delete(_ event: CalendarEvent) { do { try store.delete(event.id); reload() } catch { message = error.localizedDescription } }
+    func resize(_ event: CalendarEvent, to range: DateInterval) {
+        do {
+            guard let current = try store.get(event.id), current.startsAt == event.startsAt, current.endsAt == event.endsAt else {
+                message = "事件时间已改变或事件已删除，请刷新后重新拖动。"; reload(); return
+            }
+            _ = try store.update(id: current.id, title: current.title, startsAt: range.start, endsAt: range.end, notes: current.notes)
+            reload()
+        } catch { message = error.localizedDescription; reload() }
+    }
     func persistSettings() { do { try settingsStore.save(settings) } catch { message = error.localizedDescription }; reload() }
     func persistSidebarRatio(_ ratio: Double) {
         settings.sidebarRatio = Double(MainSplitLayout.clampedRatio(CGFloat(ratio)))
@@ -270,6 +281,7 @@ struct MainView: View {
                         open: { event in model.editing = event; model.showingEditor = true },
                         delete: { event in eventPendingDeletion = event },
                         newRange: { start, end in model.presentNewEvent((start, end)) },
+                        resize: { event, range in model.resize(event, to: range) },
                         complete: { model.complete($0) }
                     )
                     .frame(width: contentWidth, height: 1440, alignment: .topLeading)
@@ -567,7 +579,7 @@ struct SettingsView: View {
                                     Text(interval.title).tag(interval)
                                 }
                             }
-                            Text("开始前先提醒一次；到设定时间再次提醒，并提供“已完成”和“推迟 10 分钟”。推迟后只重复到点提醒。")
+                            Text("开始前弹出一次预提醒；到设定时间通过系统通知再次提醒，不再弹出推迟或完成窗口。可在时间线中编辑时间或标记完成。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.padding(6)
                     }

@@ -97,6 +97,39 @@ public enum TimelineLayout {
     public static let minimumCardHeight: CGFloat = 32
     public static let selectionStep = 15
 
+    public enum ResizeEdge: Sendable { case start, end }
+
+    public static func canResize(_ event: CalendarEvent, edge: ResizeEdge, on day: Date, calendar: Calendar = .current) -> Bool {
+        let start = calendar.startOfDay(for: day)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        return edge == .start ? event.startsAt >= start && event.startsAt < end : event.endsAt > start && event.endsAt <= end
+    }
+
+    /// Use movement relative to the original edge. Short cards have a visual
+    /// minimum height, so using the pointer's absolute Y would make them jump.
+    public static func resizedInterval(_ event: CalendarEvent, edge: ResizeEdge, on day: Date, deltaY: CGFloat, calendar: Calendar = .current) -> DateInterval? {
+        guard deltaY.isFinite, canResize(event, edge: edge, on: day, calendar: calendar) else { return nil }
+        let original = edge == .start ? event.startsAt : event.endsAt
+        let target = CGFloat(minute(original, on: day, calendar: calendar)) + deltaY / pixelsPerMinute
+        var snapped = Int((min(max(target, 0), CGFloat(dayMinutes)) / CGFloat(selectionStep)).rounded()) * selectionStep
+        let minimumDuration = TimeInterval(selectionStep * 60)
+        while (0...dayMinutes).contains(snapped) {
+            let candidate = date(atMinute: snapped, on: day, calendar: calendar)
+            let start = edge == .start ? candidate : event.startsAt
+            let end = edge == .end ? candidate : event.endsAt
+            if end.timeIntervalSince(start) >= minimumDuration { return DateInterval(start: start, end: end) }
+            snapped += edge == .start ? -selectionStep : selectionStep
+        }
+        return nil
+    }
+
+    public static func date(atMinute minute: Int, on day: Date, calendar: Calendar = .current) -> Date {
+        let start = calendar.startOfDay(for: day)
+        let minute = max(0, min(dayMinutes, minute))
+        if minute == dayMinutes { return calendar.date(byAdding: .day, value: 1, to: start)! }
+        return calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: start)!
+    }
+
     public struct Clipped: Sendable { public let event: CalendarEvent; public let start: Date; public let end: Date }
     public struct Placement: Identifiable, Sendable { public let event: CalendarEvent; public let start: Date; public let end: Date; public let column: Int; public let columns: Int; public var id: Int64 { event.id } }
 
