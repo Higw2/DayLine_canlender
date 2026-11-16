@@ -9,6 +9,8 @@ struct TimelineRepresentable: NSViewRepresentable {
     let newRange: (Date, Date) -> Void
     let resize: (CalendarEvent, DateInterval) -> Void
     let complete: (CalendarEvent) -> Void
+    var showsTimeAxis = true
+    var compactMode = false
     func makeNSView(context: Context) -> TimelineNSView { TimelineNSView() }
     func updateNSView(_ view: TimelineNSView, context: Context) {
         view.cancelIfInvalidated(day: day, events: events)
@@ -16,6 +18,7 @@ struct TimelineRepresentable: NSViewRepresentable {
         view.bgColor = bgColor; view.bgOpacity = bgOpacity; view.bgImagePath = bgImagePath; view.bgType = bgType
         view.open = open; view.delete = delete; view.newRange = newRange; view.complete = complete
         view.resizeEvent = resize
+        view.showsTimeAxis = showsTimeAxis; view.compactMode = compactMode
         view.rebuildActionButtons(); view.needsDisplay = true
     }
 }
@@ -30,6 +33,10 @@ final class TimelineNSView: NSView {
     var open: ((CalendarEvent)->Void)?; var delete: ((CalendarEvent)->Void)?
     var newRange: ((Date,Date)->Void)?; var complete: ((CalendarEvent)->Void)?
     var resizeEvent: ((CalendarEvent, DateInterval) -> Void)?
+    var showsTimeAxis = true
+    var compactMode = false
+    private var timeGutter: CGFloat { showsTimeAxis ? WeekTimelineLayout.timeAxisWidth : 0 }
+    private var layoutWidth: CGFloat { max(bounds.width, compactMode ? timeGutter + 72 : 260) }
     private var dragStart: CGFloat?; private var cards: [(TimelineLayout.Placement, NSRect)] = []
     private var creationCurrentY: CGFloat = 0
     private struct ResizeDrag {
@@ -41,7 +48,7 @@ final class TimelineNSView: NSView {
     }
     private var resizeDrag: ResizeDrag?
     private var actionButtons: [(edit: TimelineActionButton, delete: TimelineActionButton)] = []
-    private let buttonSize: CGFloat = 22
+    private var buttonSize: CGFloat { compactMode ? 18 : 22 }
     private let buttonGap: CGFloat = 3
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -113,14 +120,15 @@ final class TimelineNSView: NSView {
         for card in cards {
             guard let buttons = buttonsByID[card.0.event.id] else { continue }
             let rect = card.1
-            buttons.delete.frame = NSRect(x: rect.maxX - 5 - buttonSize, y: rect.minY + 5, width: buttonSize, height: buttonSize)
-            buttons.edit.frame = NSRect(x: buttons.delete.frame.minX - buttonGap - buttonSize, y: rect.minY + 5, width: buttonSize, height: buttonSize)
+            let buttonY = compactMode && rect.height >= 48 ? rect.maxY - buttonSize - 6 : rect.minY + 5
+            buttons.delete.frame = NSRect(x: rect.maxX - 5 - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
+            buttons.edit.frame = NSRect(x: buttons.delete.frame.minX - buttonGap - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
         }
     }
 
     private func positionedCards() -> [(TimelineLayout.Placement, NSRect)] {
-        let gutter: CGFloat = 64
-        let width = max(bounds.width, 260)
+        let gutter = timeGutter
+        let width = layoutWidth
         let previewEvents = events.map { event -> CalendarEvent in
             guard let drag = resizeDrag, let range = drag.range, event.id == drag.original.id else { return event }
             var preview = event; preview.startsAt = range.start; preview.endsAt = range.end
@@ -153,7 +161,7 @@ final class TimelineNSView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect); let gutter:CGFloat=64; let width=max(bounds.width,260)
+        super.draw(dirtyRect); let gutter = timeGutter; let width = layoutWidth
 
         let isLight = Color(hex: bgColor).isLightColor && (bgType != "image")
         let separatorCol = isLight ? NSColor.separatorColor : NSColor.white.withAlphaComponent(0.22)
@@ -163,7 +171,7 @@ final class TimelineNSView: NSView {
             let y=CGFloat(minute)
             (minute % 60 == 0 ? separatorCol : separatorCol.withAlphaComponent(0.4)).setStroke()
             let line=NSBezierPath(); line.move(to:NSPoint(x:gutter,y:y)); line.line(to:NSPoint(x:width,y:y)); line.lineWidth=minute % 60 == 0 ? 1:0.5; line.stroke()
-            if minute < 1440 && minute % 60 == 0 {
+            if showsTimeAxis && minute < 1440 && minute % 60 == 0 {
                 let text=String(format:"%02d:00",minute/60)
                 text.draw(at:NSPoint(x:9,y:y+7),withAttributes:[.font:NSFont.monospacedDigitSystemFont(ofSize:11 * fontScale,weight:.regular),.foregroundColor:labelCol])
             }
@@ -184,10 +192,12 @@ final class TimelineNSView: NSView {
             TimelineLayout.timeText(selection.0).appending(" – ").appending(TimelineLayout.timeText(selection.1)).draw(at:NSPoint(x:rect.minX+8,y:rect.minY+5),withAttributes:[.font:NSFont.systemFont(ofSize:11 * fontScale,weight:.semibold),.foregroundColor:accent])
         }
         if let drag = resizeDrag, let range = drag.range {
-            let label = "\(range.start.formatted(.dateTime.month().day().hour().minute())) — \(range.end.formatted(.dateTime.month().day().hour().minute()))"
+            let label = compactMode
+                ? "\(TimelineLayout.timeText(TimelineLayout.minute(range.start, on: day)))–\(TimelineLayout.timeText(TimelineLayout.minute(range.end, on: day)))"
+                : "\(range.start.formatted(.dateTime.month().day().hour().minute())) — \(range.end.formatted(.dateTime.month().day().hour().minute()))"
             let edgeY = cards.first(where: { $0.0.event.id == drag.original.id }).map { drag.edge == .start ? $0.1.minY : $0.1.maxY } ?? visibleRect.minY
             let y = max(visibleRect.minY + 2, min(edgeY - 27, visibleRect.maxY - 26))
-            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor]
+            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: compactMode ? 10 * fontScale : 12, weight: .semibold), .foregroundColor: NSColor.labelColor]
             let size = label.size(withAttributes: attributes)
             let bubble = NSRect(x: gutter + 5, y: y, width: min(size.width + 16, width - gutter - 10), height: 24)
             NSColor.windowBackgroundColor.setFill(); NSBezierPath(roundedRect: bubble, xRadius: 4, yRadius: 4).fill()
@@ -202,8 +212,11 @@ final class TimelineNSView: NSView {
         let start=TimelineLayout.timeText(TimelineLayout.minute(p.start,on:day)); let end=TimelineLayout.timeText(TimelineLayout.minute(p.end,on:day))
         let title=p.event.title + (rect.height < 45 ? " · \(start)" : "")
         let buttonSpace = buttonSize * 2 + buttonGap + 10
-        title.draw(in:NSRect(x:rect.minX+8,y:rect.minY+6,width:max(0,rect.width-buttonSpace-8),height:rect.height-12),withAttributes:[.font:NSFont.systemFont(ofSize:12 * fontScale,weight:.semibold),.foregroundColor:textColor])
-        if rect.height >= 45 { ("\(start) — \(end)" + (p.event.notes.isEmpty ? "" : "  ·  \(p.event.notes)")).draw(in:NSRect(x:rect.minX+8,y:rect.minY+24,width:max(0,rect.width-buttonSpace-8),height:18),withAttributes:[.font:NSFont.systemFont(ofSize:10 * fontScale),.foregroundColor:textColor.withAlphaComponent(0.9)]) }
+        let stackedActions = compactMode && rect.height >= 48
+        let textWidth = max(0, rect.width - (stackedActions ? 16 : buttonSpace + 8))
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
+        title.draw(in:NSRect(x:rect.minX+8,y:rect.minY+6,width:textWidth,height: compactMode ? 18 * fontScale : rect.height-12),withAttributes:[.font:NSFont.systemFont(ofSize:12 * fontScale,weight:.semibold),.foregroundColor:textColor,.paragraphStyle:paragraph])
+        if rect.height >= (compactMode ? 66 : 45) { ("\(start) — \(end)" + (p.event.notes.isEmpty ? "" : "  ·  \(p.event.notes)")).draw(in:NSRect(x:rect.minX+8,y:rect.minY+24,width:textWidth,height:18),withAttributes:[.font:NSFont.systemFont(ofSize:10 * fontScale),.foregroundColor:textColor.withAlphaComponent(0.9),.paragraphStyle:paragraph]) }
         NSColor.white.withAlphaComponent(0.8).setStroke()
         for edge in [TimelineLayout.ResizeEdge.start, .end] where TimelineLayout.canResize(p.event, edge: edge, on: day) {
             let y = edge == .start ? rect.minY + 2.5 : rect.maxY - 2.5
@@ -242,7 +255,7 @@ final class TimelineNSView: NSView {
             }
             return
         }
-        guard point.x > 64 else { return }
+        guard point.x > timeGutter else { return }
         dragStart = point.y; creationCurrentY = point.y; needsDisplay = true
     }
 

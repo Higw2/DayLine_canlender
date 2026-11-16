@@ -1,5 +1,29 @@
 import Foundation
 
+public enum WeekTimelineLayout {
+    public static let timeAxisWidth: CGFloat = 64
+    public static func start(of day: Date, calendar: Calendar = .current) -> Date {
+        let day = calendar.startOfDay(for: day)
+        let offset = (calendar.component(.weekday, from: day) + 5) % 7
+        return calendar.date(byAdding: .day, value: -offset, to: day)!
+    }
+    public static func days(containing day: Date, calendar: Calendar = .current) -> [Date] {
+        let start = start(of: day, calendar: calendar)
+        return (0..<7).map { calendar.date(byAdding: .day, value: $0, to: start)! }
+    }
+    public static func interval(containing day: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = start(of: day, calendar: calendar)
+        return DateInterval(start: start, end: calendar.date(byAdding: .day, value: 7, to: start)!)
+    }
+    public static func columnWidth(availableWidth: CGFloat, events: [CalendarEvent], days: [Date], fontScale: Double = 1, calendar: Calendar = .current) -> CGFloat {
+        let columns = days.flatMap { TimelineLayout.placements(events, on: $0, calendar: calendar) }.map(\.columns).max() ?? 1
+        let scale = fontScale.isFinite ? max(1, fontScale) : 1
+        let minimum = max(92, CGFloat(columns) * 72 + 10) * scale
+        let available = availableWidth.isFinite ? max(0, availableWidth - timeAxisWidth) : 0
+        return max(minimum, available / 7)
+    }
+}
+
 /// Calendar arithmetic for the responsive month grid. The UI deliberately
 /// consumes scalar values here so this logic remains cheap and testable
 /// without SwiftUI or AppKit layout types.

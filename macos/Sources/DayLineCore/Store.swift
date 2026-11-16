@@ -68,6 +68,10 @@ public final class EventStore {
     }
     public func get(_ id: Int64) throws -> CalendarEvent? { try query("\(eventSelect) WHERE id=?", [String(id)]).first }
     public func events(on day: Date, calendar: Calendar = .current) throws -> [CalendarEvent] { let start = calendar.startOfDay(for: day), end = calendar.date(byAdding: .day, value: 1, to: start)!; return try query("\(eventSelect) WHERE starts_at < ? AND ends_at > ? ORDER BY starts_at,id", [DateCodec.string(end), DateCodec.string(start)]) }
+    public func events(inWeekContaining day: Date, calendar: Calendar = .current) throws -> [CalendarEvent] {
+        let week = WeekTimelineLayout.interval(containing: day, calendar: calendar)
+        return try query("\(eventSelect) WHERE starts_at < ? AND ends_at > ? ORDER BY starts_at,id", [DateCodec.string(week.end), DateCodec.string(week.start)])
+    }
     public func upcoming(limit: Int = 5, now: Date = Date()) throws -> [CalendarEvent] { try query("\(eventSelect) WHERE completed=0 AND ends_at >= ? ORDER BY starts_at,id LIMIT ?", [DateCodec.string(now), String(limit)]) }
     public func due(now: Date = Date()) throws -> [CalendarEvent] { let old = now.addingTimeInterval(-86_400); return try query("\(eventSelect) WHERE completed=0 AND alerted_at IS NULL AND COALESCE(reminder_at,starts_at) BETWEEN ? AND ? ORDER BY COALESCE(reminder_at,starts_at),id", [DateCodec.string(old), DateCodec.string(now)]) }
     public func advanceDue(minutes: Int = 5, now: Date = Date()) throws -> [CalendarEvent] {

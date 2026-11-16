@@ -107,7 +107,7 @@ extension AppDelegate: NSWindowDelegate { func windowShouldClose(_ sender: NSWin
 final class DayLineModel: ObservableObject {
     let store: EventStore
     let notebook: NotebookModel
-    let settingsStore = SettingsStore()
+    let settingsStore: SettingsStore
     @Published var selectedDay = Calendar.current.startOfDay(for: Date())
     @Published var events: [CalendarEvent] = []
     @Published var upcoming: [CalendarEvent] = []
@@ -118,12 +118,18 @@ final class DayLineModel: ObservableObject {
     @Published var showSettings = false
     @Published var showingNotes = false
     @Published var message: String?
-    init() { do { store = try EventStore() } catch { fatalError("DayLine database: \(error)") }; notebook = NotebookModel(store: store); notebook.prepareToSave = { NoteTextView.commitFocusedInput() }; settings = settingsStore.current }
+    init(store: EventStore? = nil, settingsStore: SettingsStore? = nil) {
+        do { self.store = try store ?? EventStore() } catch { fatalError("DayLine database: \(error)") }
+        self.settingsStore = settingsStore ?? SettingsStore()
+        notebook = NotebookModel(store: self.store)
+        notebook.prepareToSave = { NoteTextView.commitFocusedInput() }
+        settings = self.settingsStore.current
+    }
     @discardableResult func showSchedule() -> Bool {
         guard notebook.flush() else { showingNotes = true; return false }
         showingNotes = false; return true
     }
-    func reload() { do { events = try store.events(on: selectedDay); upcoming = try store.upcoming(); } catch { message = error.localizedDescription } }
+    func reload() { do { events = try store.events(inWeekContaining: selectedDay); upcoming = try store.upcoming(); } catch { message = error.localizedDescription } }
     func go(_ days: Int) { selectedDay = Calendar.current.date(byAdding: .day, value: days, to: selectedDay)!; reload() }
     func presentNewEvent(_ range: (Date, Date)? = nil) { editing = nil; draftRange = range; showingEditor = true }
     @discardableResult func save(title: String, start: Date, end: Date, notes: String) -> Bool { do { if let event = editing { _ = try store.update(id: event.id, title: title, startsAt: start, endsAt: end, notes: notes) } else { _ = try store.add(title: title, startsAt: start, endsAt: end, notes: notes) }; editing = nil; draftRange = nil; showingEditor = false; reload(); return true } catch { message = error.localizedDescription; return false } }
@@ -167,7 +173,11 @@ struct MainView: View {
         _displayedMonth = State(initialValue: MonthGridLayout.monthStart(for: model.selectedDay, calendar: calendar))
     }
 
-    private var dayText: String { let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年MM月dd日 EEEE"; return f.string(from: model.selectedDay) }
+    private var weekText: String {
+        let days = WeekTimelineLayout.days(containing: model.selectedDay)
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
+        return "\(f.string(from: days[0])) — \(f.string(from: days[6]))"
+    }
     private var isLightBg: Bool {
         if model.settings.bgType == "image" { return false }
         return Color(hex: model.settings.bgColor).isLightColor
@@ -184,6 +194,10 @@ struct MainView: View {
         }
         .frame(minWidth: 840, minHeight: 600)
         .font(.system(size: 13 * model.settings.fontScale))
+        .onChange(of: model.selectedDay) { day in
+            displayedMonth = MonthGridLayout.monthStart(for: day)
+            model.reload()
+        }
         .sheet(isPresented: $model.showingEditor, onDismiss: { model.editing = nil; model.draftRange = nil }) {
             EventEditor(model: model).font(.system(size: 13 * model.settings.fontScale))
         }
@@ -233,7 +247,6 @@ struct MainView: View {
                     accent: Color(hex: model.settings.themeColor),
                     fontScale: model.settings.fontScale
                 )
-                    .onChange(of: model.selectedDay) { _ in model.reload() }
                 Text("下一项安排").font(.headline)
                 if model.upcoming.isEmpty {
                     Text("暂无近期待办").foregroundStyle(.secondary)
@@ -265,28 +278,7 @@ struct MainView: View {
                 .padding(12)
                 .background(.ultraThinMaterial.opacity(0.75))
             Divider()
-            GeometryReader { proxy in
-                let columns = TimelineLayout.placements(model.events, on: model.selectedDay).map(\.columns).max() ?? 1
-                let contentWidth = max(260, proxy.size.width, 74 + CGFloat(columns) * 72)
-                ScrollView(contentWidth > proxy.size.width + 1 ? [.vertical, .horizontal] : .vertical) {
-                    TimelineRepresentable(
-                        day: model.selectedDay,
-                        events: model.events,
-                        color: model.settings.themeColor,
-                        fontScale: model.settings.fontScale,
-                        bgColor: model.settings.bgColor,
-                        bgOpacity: model.settings.bgOpacity,
-                        bgImagePath: model.settings.bgImagePath,
-                        bgType: model.settings.bgType,
-                        open: { event in model.editing = event; model.showingEditor = true },
-                        delete: { event in eventPendingDeletion = event },
-                        newRange: { start, end in model.presentNewEvent((start, end)) },
-                        resize: { event, range in model.resize(event, to: range) },
-                        complete: { model.complete($0) }
-                    )
-                    .frame(width: contentWidth, height: 1440, alignment: .topLeading)
-                }
-            }
+            WeekTimelineView(model: model, delete: { eventPendingDeletion = $0 })
         }
     }
 
@@ -294,7 +286,7 @@ struct MainView: View {
         ViewThatFits(in: .horizontal) {
             HStack {
                 navigationButtons
-                Text(dayText).font(.title3.bold()).lineLimit(1)
+                Text(weekText).font(.title3.bold()).lineLimit(1)
                 Spacer(minLength: 10)
                 eventSummary
                 Button("偏好设置") { model.showSettings = true }.buttonStyle(.bordered)
@@ -305,7 +297,7 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     navigationButtons
-                    Text(dayText).font(.headline).lineLimit(1)
+                    Text(weekText).font(.headline).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 HStack {
@@ -320,9 +312,9 @@ struct MainView: View {
 
     private var navigationButtons: some View {
         HStack(spacing: 6) {
-            Button("‹") { model.go(-1) }.buttonStyle(.bordered)
-            Button("›") { model.go(1) }.buttonStyle(.bordered)
-            Button("今天") { returnToToday() }.buttonStyle(.bordered)
+            Button("‹") { model.go(-7) }.buttonStyle(.bordered).help("上一周").accessibilityLabel("上一周")
+            Button("›") { model.go(7) }.buttonStyle(.bordered).help("下一周").accessibilityLabel("下一周")
+            Button("本周") { returnToToday() }.buttonStyle(.bordered)
         }
     }
 
@@ -335,7 +327,7 @@ struct MainView: View {
     }
 
     private var eventSummary: some View {
-        Text("\(model.events.filter { !$0.completed }.count) 项待办 · \(model.events.count) 个事件")
+        Text("本周 \(model.events.filter { !$0.completed }.count) 项待办 · \(model.events.count) 个事件")
             .foregroundStyle(.secondary).lineLimit(1)
     }
 
@@ -380,8 +372,7 @@ struct EventEditor: View {
         }
     }
     private func defaultStart() -> Date {
-        let date = max(Date(), model.selectedDay)
-        return Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: date)!
+        Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: model.selectedDay)!
     }
 }
 
